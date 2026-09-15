@@ -209,6 +209,28 @@ export class FreebuffChat {
     return session;
   }
 
+  /** شروع فرایند ورود (مثل CLI): لینک ورود وب را برمی‌گرداند */
+  async startCliLogin(fingerprintId) {
+    const res = await fetch(`${this.websiteUrl}/api/auth/cli/code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprintId }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.loginUrl) throw new Error(`دریافت لینک ورود ناموفق (${res.status})`);
+    return data;
+  }
+
+  /** بررسی وضعیت ورود؛ {ok:true, user} یا {ok:false} */
+  async pollCliLogin({ fingerprintId, fingerprintHash, expiresAt }) {
+    const q = new URLSearchParams({ fingerprintId, fingerprintHash, expiresAt: String(expiresAt) });
+    const res = await fetch(`${this.websiteUrl}/api/auth/cli/status?${q}`);
+    if (res.status === 401) return { ok: false, pending: true };
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.user) return { ok: true, user: data.user };
+    return { ok: false, pending: false, status: res.status };
+  }
+
   /** شروع یک run جدید؛ runId برای متادیتای چت لازم است */
   async startRun(agentId = this.agent) {
     const res = await fetch(`${this.websiteUrl}/api/v1/agent-runs`, {

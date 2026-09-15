@@ -52,7 +52,7 @@ const HELP = `🛡️ *نگهبان فری‌باف*
 /model — دیدن مدل فعلی
 /model provider/model — تغییر مدل (سشن را سوییچ می‌کند)
 /models — لیست مدل‌های رایگان
-/account — مدیریت اکانت‌های فری‌باف (تعویض/افزودن)
+/account — مدیریت اکانت‌ها (تعویض/افزودن با ورود وب)
 /ads on\\|off — تبلیغات
 
 *چت با فری‌باف*
@@ -87,6 +87,7 @@ export class GuardianBot {
       },
     });
     this.pendingAdd = new Map(); // userId → نام اکانتی که منتظر JSON آن هستیم
+    this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
@@ -138,6 +139,70 @@ export class GuardianBot {
       'برای تعویض روی اکانت بزن.',
       'افزودن: `/account add <name>` و بعد فرستادن محتوای `credentials.json`.',
     ].join('\n');
+  }
+
+  /** شروع ورود وب برای افزودن اکانت (همان مکانیزم CLI login) */
+  async startWebLogin(chatId, userId, name) {
+    if (!/^[\w.-]{1,40}$/.test(name) || name === 'default') {
+      return this.send(chatId, '❌ نام اکانت نامعتبر است (حروف/عدد/.-_ و نه default).');
+    }
+    const fingerprintId = `freebuff-guardian-${name}-${Date.now().toString(36)}`;
+    let code;
+    try {
+      code = await this.chat.startCliLogin(fingerprintId);
+    } catch (e) {
+      return this.send(chatId, `❌ ${e.message}`);
+    }
+
+    const prev = this.pendingLogin.get(userId);
+    if (prev?.timer) clearInterval(prev.timer);
+
+    const deadline = Math.min(Date.now() + 10 * 60000, code.expiresAt || 0) || Date.now() + 10 * 60000;
+    const st = { name, fingerprintId: code.fingerprintId || fingerprintId, fingerprintHash: code.fingerprintHash, expiresAt: code.expiresAt };
+    st.timer = setInterval(() => this.checkWebLogin(chatId, userId, deadline).catch(() => {}), 5000);
+    st.timer.unref?.();
+    this.pendingLogin.set(userId, st);
+
+    const kb = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔗 باز کردن صفحهٔ ورود', url: code.loginUrl }],
+          [{ text: '❌ لغو', callback_data: 'accwebcancel' }],
+        ],
+      },
+    };
+    return this.send(chatId, `🌐 *افزودن اکانت «${name}»*\n\nاین لینک را باز کن، در سایت فری‌باف لاگین کن و تأیید کن:\n\n${code.loginUrl}\n\n⏳ منتظر تأیید هستم…`, kb);
+  }
+
+  /** بررسی دوره‌ای ورود وب */
+  async checkWebLogin(chatId, userId, deadline) {
+    const st = this.pendingLogin.get(userId);
+    if (!st) return;
+    if (Date.now() > deadline || (st.expiresAt && Date.now() > st.expiresAt)) {
+      clearInterval(st.timer);
+      this.pendingLogin.delete(userId);
+      return this.send(chatId, `⌛ زمان ورود اکانت «${st.name}» تمام شد. دوباره /account add بزن.`);
+    }
+    let r;
+    try { r = await this.chat.pollCliLogin(st); } catch { return; }
+    if (!r?.ok) return;
+    clearInterval(st.timer);
+    this.pendingLogin.delete(userId);
+    try {
+      const acc = this.accounts.add(st.name, {
+        default: {
+          id: r.user.id,
+          name: r.user.name,
+          email: r.user.email,
+          authToken: r.user.authToken,
+          fingerprintId: r.user.fingerprintId || st.fingerprintId,
+          fingerprintHash: r.user.fingerprintHash || st.fingerprintHash,
+        },
+      });
+      return this.send(chatId, `✅ اکانت \`${acc.name}\` اضافه شد. برای فعال‌کردن روی آن بزن.`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+    } catch (e) {
+      return this.send(chatId, `❌ ${e.message}`);
+    }
   }
 
   accountKeyboard() {
@@ -237,8 +302,16 @@ export class GuardianBot {
         }
         if (sub === 'add') {
           if (!name) return this.send(chatId, 'استفاده: /account add <name>');
-          this.pendingAdd.set(userId, name);
-          return this.send(chatId, `📥 حالا محتوای فایل \`credentials.json\` اکانت «${name}» را بفرست.`);
+          const kb = {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🌐 ورود با وب', callback_data: `accweb:${name}` }],
+                [{ text: '📋 پیست credentials.json', callback_data: `accjson:${name}` }],
+                [{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }],
+              ],
+            },
+          };
+          return this.send(chatId, `افزودن اکانت «${name}» — روش را انتخاب کن:`, kb);
         }
         if (sub === 'del') {
           try { this.accounts.remove(name); } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
@@ -647,8 +720,10 @@ export class GuardianBot {
           return this.render(chatId, messageId, [
             '➕ *افزودن اکانت*',
             '',
-            '۱) دستور `/account add <name>` را بفرست (مثلاً `friend1`).',
-            '۲) بعد محتوای کامل فایل `credentials.json` آن اکانت را پیست کن.',
+            'دستور `/account add <name>` را بفرست (مثلاً `friend1`).',
+            'بعد انتخاب کن:',
+            '• 🌐 *ورود با وب* — لینک لاگین سایت را می‌دهد؛ لازم نیست چیزی روی سرور نصب شود.',
+            '• 📋 *پیست credentials.json* — اگر فایل را داری.',
           ].join('\n'), [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
         }
         if (!this.accounts.has(value)) {
@@ -659,6 +734,21 @@ export class GuardianBot {
         this.applyActiveAccount();
         await answer(`اکانت فعال: ${value}`);
         return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
+      }
+
+      case 'accweb':
+        return this.startWebLogin(chatId, userId, value);
+
+      case 'accjson':
+        this.pendingAdd.set(userId, value);
+        return this.render(chatId, messageId, `📋 محتوای کامل فایل \`credentials.json\` اکانت «${value}» را پیست و بفرست.`, [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }]]);
+
+      case 'accwebcancel': {
+        const st = this.pendingLogin.get(userId);
+        if (st?.timer) clearInterval(st.timer);
+        this.pendingLogin.delete(userId);
+        await answer('لغو شد');
+        return this.render(chatId, messageId, this.accountText(), this.accountKeyboard());
       }
 
       case 'warn': {
