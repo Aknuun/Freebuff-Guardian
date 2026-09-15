@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.log
+
+# state و قفل‌های runtime
+state.json
+state.json.bak*
+*.bak-*
+freebuff-guardian.lock
+
+# سیستم‌عامل
+.DS_Store

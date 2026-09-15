@@ -1,0 +1,14 @@
+{
+  "name": "freebuff-guardian",
+  "version": "1.0.0",
+  "description": "Telegram guardian bot for Freebuff — full remote control without SSH",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@codebuff/sdk": "^0.10.7",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Freebuff Guardian Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/freebuff-guardian
+EnvironmentFile=/root/freebuff-guardian/.env
+ExecStart=/usr/bin/node /root/freebuff-guardian/src/index.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
