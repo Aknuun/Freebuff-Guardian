@@ -7,6 +7,8 @@
 ربات تلگرامی برای **مدیریت و چت کامل با فری‌باف (Freebuff) روی سرور، بدون نیاز به SSH**.
 همه‌چیز از داخل تلگرام — با دکمه‌های شیشه‌ای یا دستور متنی — قابل کنترل است.
 
+> 🌐 پروژهٔ اصلی فری‌باف: **https://freebuff.com** — اول باید روی سرورت نصبش کنی (بخش پیش‌نیاز پایین).
+
 ---
 
 ## ✨ قابلیت‌ها
@@ -55,22 +57,40 @@
 
 ---
 
-## 🚀 نصب سریع
+## ⚠️ پیش‌نیاز: اول فری‌باف را روی سرور نصب کن
+این ربات فقط یک **رابط** است؛ بدون فری‌باف کار نمی‌کند. قبل از هر چیز باید
+فری‌باف را روی همان سرور نصب و لاگین کنی:
+
+```bash
+npm i -g freebuff
+freebuff          # بار اول: login کن
+```
+
+- 🌐 سایت اصلی پروژه: **https://freebuff.com**
+- بعد از لاگین، فایل `~/.config/manicode/credentials.json` ساخته می‌شود که ربات از آن استفاده می‌کند.
+
+## 🚀 نصب سریع (تعاملی)
+اسکریپت نصب خودش توکن ربات و آیدی عددی تو را می‌پرسد:
 ```bash
 git clone https://github.com/Aknuun/Freebuff-Guardian.git
 cd Freebuff-Guardian
-cp .env.example .env
-# .env را با TELEGRAM_BOT_TOKEN و ALLOWED_USER_IDS پر کن
-npm install
-node src/index.mjs   # تست
+bash install.sh
 ```
+اسکریپت به ترتیب این کارها را می‌کند:
+1. نصب‌بودن **Node.js** و **فری‌باف** را چک می‌کند و آدرس نصب فری‌باف را نشان می‌دهد.
+2. **توکن ربات** را می‌گیرد — از [@BotFather](https://t.me/BotFather) با دستور `/newbot`.
+3. **آیدی عددی** تو را می‌گیرد — از [@userinfobot](https://t.me/userinfobot).
+4. فایل `.env` را می‌سازد، وابستگی‌ها را نصب می‌کند و در صورت تمایل ربات را
+   به‌عنوان سرویس systemd اجرا می‌کند.
 
-پیش‌نیاز: روی سرور باید فری‌باف نصب و لاگین شده باشد
-(`~/.config/manicode/credentials.json` وجود داشته باشد).
+> اگر ترجیح می‌دهی دستی نصب کنی: `.env.example` را به `.env` کپی کن،
+> مقادیر `TELEGRAM_BOT_TOKEN` و `ALLOWED_USER_IDS` را پر کن، بعد `npm install`
+> و در نهایت `node src/index.mjs`.
 
-## ⚙️ نصب به‌عنوان سرویس
+## ⚙️ نصب به‌عنوان سرویس (دستی)
 ```bash
 cp freebuff-guardian.service /etc/systemd/system/
+# مسیرها داخل فایل را در صورت نیاز اصلاح کن
 systemctl daemon-reload
 systemctl enable --now freebuff-guardian
 journalctl -u freebuff-guardian -f
