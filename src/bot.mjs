@@ -33,6 +33,13 @@ const log = makeLogger('bot');
 // دکمه‌های ثابت پایین تلگرام (Reply Keyboard)
 const REPLY_LABELS = new Set(['📊 وضعیت', '▶️ استارت', '🤖 مدل']);
 
+/** ساخت دکمه با رنگ اختیاری (style: primary=آبی، success=سبز، danger=قرمز) */
+function btn(text, callback_data, style) {
+  const b = { text, callback_data };
+  if (style) b.style = style;
+  return b;
+}
+
 /** نام اکانت را از اطلاعات کاربر می‌سازد (ASCII و امن برای نام فایل) */
 function accountSlug(user) {
   const base = String(user?.email || user?.name || '').toLowerCase();
@@ -62,38 +69,6 @@ function humanMs(ms) {
   if (total < 60) return `${total} دقیقه`;
   return `${Math.floor(total / 60)} ساعت و ${total % 60} دقیقه`;
 }
-
-const HELP = `🛡️ *نگهبان فری‌باف*
-
-مدیریت کامل فری‌باف از تلگرام — بدون SSH.
-/menu — منوی دکمه‌ای (ساده‌ترین راه)
-⌨️ سه دکمهٔ ثابت پایین صفحه: 📊 وضعیت · ▶️ استارت · 🤖 مدل
-
-*تنظیمات فری‌باف*
-/status — وضعیت کلی (با تایمر سشن)
-/renew — تمدید سشن (ریست تایمر ۱ ساعته)
-/settings — نمایش تنظیمات
-/mode DEFAULT\\|AGENT\\|PLAN\\|PRINT
-/model — دیدن مدل فعلی
-/model provider/model — تغییر مدل (سشن را سوییچ می‌کند)
-/models — لیست مدل‌های رایگان
-/account — مدیریت اکانت‌ها (تعویض/افزودن با ورود وب)
-/ads on\\|off — تبلیغات
-
-*چت با فری‌باف*
-/new نام — سشن جدید
-/sessions — لیست سشن‌ها
-/switch نام — سوییچ
-/del نام — حذف
-/clear — پاک‌کردن تاریخچه
-متن ساده بفرست تا با مدل رایگان چت کند.
-
-*مدیریت سرور*
-/ps — پروسه‌های کلیدی
-/restart نام‌سرویس — ری‌استارت systemd
-/freebuff restart\\|stop\\|start
-/instances — وضعیت قفل و instance
-/unlock — آزادسازی قفل گیرکرده`;
 
 export class GuardianBot {
   constructor(cfg, state, instances) {
@@ -147,7 +122,11 @@ export class GuardianBot {
   replyKeyboardMarkup() {
     return {
       reply_markup: {
-        keyboard: [[{ text: '📊 وضعیت' }, { text: '▶️ استارت' }, { text: '🤖 مدل' }]],
+        keyboard: [[
+          { text: '📊 وضعیت', style: 'primary' },
+          { text: '▶️ استارت', style: 'success' },
+          { text: '🤖 مدل', style: 'primary' },
+        ]],
         resize_keyboard: true,
         is_persistent: true,
         input_field_placeholder: 'پیام بفرست یا از دکمه‌ها استفاده کن',
@@ -247,8 +226,8 @@ export class GuardianBot {
     const kb = {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🔗 باز کردن صفحهٔ ورود', url: code.loginUrl }],
-          [{ text: '❌ لغو', callback_data: 'accwebcancel' }],
+          [{ text: '🔗 باز کردن صفحهٔ ورود', url: code.loginUrl, style: 'success' }],
+          [btn('❌ لغو', 'accwebcancel', 'danger')],
         ],
       },
     };
@@ -292,10 +271,10 @@ export class GuardianBot {
   accountMethodKeyboard(name = '') {
     const suffix = `:${name}`;
     return [
-      [{ text: '🌐 ورود با وب', callback_data: `accweb${suffix}` }],
-      [{ text: '📋 پیست credentials.json', callback_data: `accjson${suffix}` }],
-      [{ text: '✏️ با نام دلخواه', callback_data: 'accnamed' }],
-      [{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }],
+      [btn('🌐 ورود با وب', `accweb${suffix}`, 'success')],
+      [btn('📋 پیست credentials.json', `accjson${suffix}`)],
+      [btn('✏️ با نام دلخواه', 'accnamed')],
+      [btn('↩️ اکانت‌ها', 'menu:account')],
     ];
   }
 
@@ -303,10 +282,10 @@ export class GuardianBot {
     const active = this.activeAccountName();
     const rows = this.accounts.list().map((a) => {
       const label = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
-      return [{ text: `${a.name === active ? '✅ ' : ''}${label}`, callback_data: `acc:${a.name}` }];
+      return [btn(`${a.name === active ? '✅ ' : ''}${label}`, `acc:${a.name}`, a.name === active ? 'success' : 'primary')];
     });
-    rows.push([{ text: '➕ افزودن اکانت', callback_data: 'acc:add' }]);
-    rows.push([{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    rows.push([btn('➕ افزودن اکانت', 'acc:add', 'success')]);
+    rows.push([btn('↩️ تنظیمات', 'menu:settings'), btn('🏠 منوی اصلی', 'menu:home')]);
     return rows;
   }
 
@@ -347,7 +326,7 @@ export class GuardianBot {
         return this.render(chatId, null, this.homeText(u), this.homeKeyboard(u));
 
       case '/help':
-        return this.send(chatId, HELP, { reply_markup: { inline_keyboard: [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]] } });
+        return this.send(chatId, this.helpText(), { reply_markup: { inline_keyboard: this.helpKeyboard() } });
 
       case '/status':
         return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: this.statusKeyboard() } });
@@ -533,23 +512,110 @@ export class GuardianBot {
   homeKeyboard(u) {
     return [
       [
-        { text: '📊 وضعیت', callback_data: 'menu:status' },
-        { text: '▶️ استارت', callback_data: 'menu:start' },
-        { text: '🤖 مدل', callback_data: 'menu:model' },
+        btn('📊 وضعیت', 'menu:status', 'primary'),
+        btn('▶️ استارت', 'menu:start', 'success'),
+        btn('🤖 مدل', 'menu:model', 'primary'),
       ],
       [
-        { text: `💬 سشن‌ها (${u.activeSession ?? '—'})`, callback_data: 'menu:sessions' },
-        { text: '⚙️ تنظیمات', callback_data: 'menu:settings' },
-        { text: `👤 ${this.activeAccountName()}`, callback_data: 'menu:account' },
+        btn(`💬 سشن‌ها (${u.activeSession ?? '—'})`, 'menu:sessions', 'primary'),
+        btn('⚙️ تنظیمات', 'menu:settings', 'primary'),
+        btn(`👤 ${this.activeAccountName()}`, 'menu:account', 'primary'),
       ],
-      [{ text: '➕ سشن جدید', callback_data: 'menu:new' }, { text: '🧹 پاک‌کردن تاریخچه', callback_data: 'menu:clear' }],
+      [btn('➕ سشن جدید', 'menu:new', 'success'), btn('🧹 پاک‌کردن تاریخچه', 'menu:clear', 'danger')],
       [
-        { text: '🖥 سرور', callback_data: 'menu:server' },
-        { text: '❓ راهنما', callback_data: 'menu:help' },
-        { text: '⌨️ کیبورد', callback_data: 'menu:keyboard' },
+        btn('🖥 سرور', 'menu:server', 'primary'),
+        btn('❓ راهنما', 'menu:help'),
+        btn('⌨️ کیبورد', 'menu:keyboard'),
       ],
-      [{ text: this.timerButtonText(), callback_data: 'menu:timer' }],
+      [btn(this.timerButtonText(), 'menu:timer', 'primary')],
     ];
+  }
+
+  helpKeyboard() {
+    return [
+      [btn('💵 سهمیه و Freebucks', 'help:quota', 'primary')],
+      [btn('⏳ سشن و تایمر', 'help:session', 'primary')],
+      [btn('🤖 مدل‌ها', 'help:model', 'primary')],
+      [btn('👤 اکانت‌ها', 'help:account', 'primary')],
+      [btn('💬 چت و سشن‌ها', 'help:chat', 'primary')],
+      [btn('🖥 سرور', 'help:server', 'primary')],
+      [btn('🏠 منوی اصلی', 'menu:home')],
+    ];
+  }
+
+  helpText() {
+    return '❓ *راهنما*\nیک بخش را انتخاب کن تا توضیحش همین‌جا بیاید.';
+  }
+
+  helpSectionText(section) {
+    const sections = {
+      quota: [
+        '💵 *سهمیه و Freebucks*',
+        '',
+        'فری‌باف هر روز یک بودجهٔ «Freebucks» می‌دهد که بین همهٔ مدل‌ها مشترک است.',
+        '• هر سشن، هنگام شروع، معادل قیمت ساعتی مدل از Freebucks کم می‌کند (یک‌بار، نه هر پیام).',
+        '• قیمت‌ها (Freebucks برای هر ساعت): GLM 5.3 Flash=۵ · Kimi=۵ · MiMo=۱۰ · Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini 3.8=۵۰',
+        '• اگر همهٔ بودجه روی یک مدل خرج شود: GLM ≈ ۱۴ ساعت · DeepSeek ≈ ۴ ساعت · Luna ≈ ۳ ساعت.',
+        '• بودجه هر روز نیمه‌شب Pacific پر می‌شود و منتقل نمی‌شود.',
+        '• بعضی مدل‌ها «پریمیوم»‌اند و سقف روزانهٔ جدا (۵ بار) هم دارند.',
+        '',
+        '📊 استفاده‌شده و مانده در «وضعیت» و «👤 اکانت‌ها» نوشته می‌شود.',
+      ].join('\n'),
+      session: [
+        '⏳ *سشن و تایمر*',
+        '',
+        'هر سشن رایگان دقیقاً ۱ ساعت عمر می‌کند و چت‌کردن تمدیدش نمی‌کند.',
+        '• دکمهٔ «⏳ سشن» در پایین منو زمان باقی‌مانده را نشان می‌دهد.',
+        '• ۵ دقیقه قبل از انقضا هشدار می‌آید (با «⏰ هشدار انقضا» در تنظیمات قابل تغییر).',
+        '• «▶️ استارت» اگر سشنی نباشد یکی می‌سازد؛ «🔄 تمدید سشن» تایمر را از نو می‌کند.',
+        '• پیام بعدی هم خودکار سشن تازه می‌سازد؛ پس وقفه‌ای حس نمی‌کنی.',
+      ].join('\n'),
+      model: [
+        '🤖 *مدل‌ها*',
+        '',
+        'از «🤖 مدل» مدل را عوض کن؛ agent هماهنگ خودکار انتخاب می‌شود.',
+        '• ارزان‌ترین (۵ FB/ساعت): GLM 5.3 Flash · Kimi',
+        '• متوسط (۱۰): MiMo 2.5 · Solar Pro 4',
+        '• گران‌تر: DeepSeek V4 Flash (۱۵) · Luna (۲۰) · Gemini 3.8 (۵۰)',
+        '',
+        'سوییچ مدل، سشن فعلی را می‌بندد و سشن جدید می‌سازد.',
+      ].join('\n'),
+      account: [
+        '👤 *اکانت‌ها*',
+        '',
+        'برای استفادهٔ شریکی؛ هرکس اکانت خودش.',
+        '«➕ افزودن اکانت» را بزن و یکی را انتخاب کن:',
+        '• «🌐 ورود با وب» — لینک لاگین می‌دهد؛ در سایت فری‌باف لاگین کن، اکانت خودکار اضافه می‌شود.',
+        '• «📋 پیست credentials.json» — اگر فایل را داری.',
+        '• «✏️ با نام دلخواه» — قبلش اسم بده.',
+        '',
+        'هر اکانت سشن و Freebucks مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
+      ].join('\n'),
+      chat: [
+        '💬 *چت و سشن‌ها*',
+        '',
+        'یک پیام معمولی بفرست تا با مدل فعال چت کنی.',
+        '• «➕ سشن جدید» یک گفتگوی جدا می‌سازد.',
+        '• «💬 سشن‌ها» برای سوییچ/حذف (حذف با تأیید).',
+        '• «🧹 پاک‌کردن تاریخچه» پیام‌های سشن فعال را پاک می‌کند.',
+      ].join('\n'),
+      server: [
+        '🖥 *سرور*',
+        '',
+        '• «📈 پروسه‌ها» — پروسه‌های پرحافظه',
+        '• «♻️ ری‌استارت freebuff» و «⏹ توقف CLI»',
+        '• «🔐 وضعیت instance» و «🔓 آزادسازی قفل»',
+      ].join('\n'),
+      settings: [
+        '⚙️ *تنظیمات*',
+        '',
+        '• «🎛 مود» — حالت اجرای فری‌باف (DEFAULT/AGENT/PLAN/PRINT)',
+        '• «📢 تبلیغات» — روشن/خاموش',
+        '• «🤖 مدل» — مدل فعال',
+        '• «⏰ هشدار انقضا» — چند دقیقه قبل هشدار بدهد (خاموش/۲/۵/۱۰)',
+      ].join('\n'),
+    };
+    return sections[section] || this.helpText();
   }
 
   settingsText() {
@@ -567,21 +633,17 @@ export class GuardianBot {
   settingsKeyboard() {
     const warn = this.warnMin;
     const mark = (n) => (warn === n ? '✅ ' : '');
+    const warnBtn = (n, label) => btn(`${mark(n)}${label}`, `warn:${n}`, warn === n ? 'success' : undefined);
     return [
       [
-        { text: `🎛 مود: ${this.settings.getMode()}`, callback_data: 'menu:mode' },
-        { text: `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, callback_data: 'menu:ads' },
+        btn(`🎛 مود: ${this.settings.getMode()}`, 'menu:mode', 'primary'),
+        btn(`📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, 'menu:ads', this.settings.getAds() ? 'success' : 'danger'),
       ],
-      [{ text: `🤖 مدل: ${this.settings.getModel()}`, callback_data: 'menu:model' }],
-      [{ text: `👤 اکانت: ${this.activeAccountName()}`, callback_data: 'menu:account' }],
-      [
-        { text: `${mark(0)}خاموش`, callback_data: 'warn:0' },
-        { text: `${mark(2)}۲د`, callback_data: 'warn:2' },
-        { text: `${mark(5)}۵د`, callback_data: 'warn:5' },
-        { text: `${mark(10)}۱۰د`, callback_data: 'warn:10' },
-      ],
-      [{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }],
-      [{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
+      [btn(`🤖 مدل: ${this.settings.getModel()}`, 'menu:model', 'primary')],
+      [btn(`👤 اکانت: ${this.activeAccountName()}`, 'menu:account', 'primary')],
+      [warnBtn(0, 'خاموش'), warnBtn(2, '۲د'), warnBtn(5, '۵د'), warnBtn(10, '۱۰د')],
+      [btn('🔄 تمدید سشن', 'menu:renew', 'success')],
+      [btn('🏠 منوی اصلی', 'menu:home')],
     ];
   }
 
@@ -593,8 +655,11 @@ export class GuardianBot {
 
   modelKeyboard() {
     const cur = this.settings.getModel();
-    const rows = freeModels().map((m) => [{ text: `${m === cur ? '✅ ' : ''}${m}`, callback_data: `model:${m}` }]);
-    rows.push([{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    const prices = this.chat.lastQuota?.freebucks?.prices ?? {};
+    const rows = freeModels().map((m) => [
+      btn(`${m === cur ? '✅ ' : ''}${m}${prices[m] != null ? `  (${prices[m]} FB)` : ''}`, `model:${m}`, m === cur ? 'success' : 'primary'),
+    ]);
+    rows.push([btn('↩️ تنظیمات', 'menu:settings'), btn('🏠 منوی اصلی', 'menu:home')]);
     return rows;
   }
 
@@ -603,28 +668,28 @@ export class GuardianBot {
     const modes = ['DEFAULT', 'AGENT', 'PLAN', 'PRINT'];
     const rows = [];
     for (let i = 0; i < modes.length; i += 2) {
-      rows.push(modes.slice(i, i + 2).map((m) => ({ text: `${m === cur ? '✅ ' : ''}${m}`, callback_data: `mode:${m}` })));
+      rows.push(modes.slice(i, i + 2).map((m) => btn(`${m === cur ? '✅ ' : ''}${m}`, `mode:${m}`, m === cur ? 'success' : 'primary')));
     }
-    rows.push([{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    rows.push([btn('↩️ تنظیمات', 'menu:settings'), btn('🏠 منوی اصلی', 'menu:home')]);
     return rows;
   }
 
   adsKeyboard() {
     const on = this.settings.getAds();
     return [
-      [{ text: `${on ? '✅ ' : ''}روشن`, callback_data: 'ads:on' }, { text: `${!on ? '✅ ' : ''}خاموش`, callback_data: 'ads:off' }],
-      [{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
+      [btn(`${on ? '✅ ' : ''}روشن`, 'ads:on', 'success'), btn(`${!on ? '✅ ' : ''}خاموش`, 'ads:off', 'danger')],
+      [btn('↩️ تنظیمات', 'menu:settings'), btn('🏠 منوی اصلی', 'menu:home')],
     ];
   }
 
   sessionsKeyboard(userId) {
     const u = this.state.user(userId);
     const rows = this.state.listSessions(userId).map((n) => [
-      { text: `${n === u.activeSession ? '✅ ' : ''}${n}`, callback_data: `ses:${encodeURIComponent(n)}` },
-      { text: '🗑', callback_data: `delq:${encodeURIComponent(n)}` },
+      btn(`${n === u.activeSession ? '✅ ' : ''}${n}`, `ses:${encodeURIComponent(n)}`, n === u.activeSession ? 'success' : 'primary'),
+      btn('🗑', `delq:${encodeURIComponent(n)}`, 'danger'),
     ]);
-    rows.push([{ text: '➕ سشن جدید', callback_data: 'menu:new' }]);
-    rows.push([{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    rows.push([btn('➕ سشن جدید', 'menu:new', 'success')]);
+    rows.push([btn('🏠 منوی اصلی', 'menu:home')]);
     return rows;
   }
 
@@ -639,17 +704,17 @@ export class GuardianBot {
 
   serverKeyboard() {
     return [
-      [{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }],
-      [{ text: '📈 پروسه‌ها', callback_data: 'svc:ps' }],
-      [{ text: '♻️ ری‌استارت freebuff', callback_data: 'fb:restart' }, { text: '⏹ توقف CLI', callback_data: 'fb:stop' }],
-      [{ text: '🔐 وضعیت instance', callback_data: 'menu:instances' }, { text: '🔓 آزادسازی قفل', callback_data: 'svc:unlock' }],
-      [{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
+      [btn('🔄 تمدید سشن', 'menu:renew', 'success')],
+      [btn('📈 پروسه‌ها', 'svc:ps', 'primary')],
+      [btn('♻️ ری‌استارت freebuff', 'fb:restart', 'success'), btn('⏹ توقف CLI', 'fb:stop', 'danger')],
+      [btn('🔐 وضعیت instance', 'menu:instances', 'primary'), btn('🔓 آزادسازی قفل', 'svc:unlock', 'danger')],
+      [btn('🏠 منوی اصلی', 'menu:home')],
     ];
   }
 
   statusKeyboard() {
     return [
-      [{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
+      [btn('🔄 تمدید سشن', 'menu:renew', 'success'), btn('🏠 منوی اصلی', 'menu:home')],
     ];
   }
 
@@ -773,7 +838,7 @@ export class GuardianBot {
           }
           case 'instances': return this.render(chatId, messageId, this.instances.statusText(), [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
           case 'server': return this.render(chatId, messageId, '🖥 *مدیریت سرور*', this.serverKeyboard());
-          case 'help': return this.render(chatId, messageId, HELP, [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
+          case 'help': return this.render(chatId, messageId, this.helpText(), this.helpKeyboard());
           default: return home();
         }
 
@@ -835,6 +900,11 @@ export class GuardianBot {
         return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
       }
 
+      case 'help': {
+        const kb = [[btn('↩️ راهنما', 'menu:help'), btn('🏠 منوی اصلی', 'menu:home')]];
+        return this.render(chatId, messageId, this.helpSectionText(value), kb);
+      }
+
       case 'warn': {
         this.warnMin = parseInt(value, 10) || 0;
         this.state.setMeta('sessionWarnMin', this.warnMin);
@@ -855,7 +925,7 @@ export class GuardianBot {
       case 'delq': {
         const name = decodeURIComponent(value);
         const kb = [
-          [{ text: '🗑 بله، حذف کن', callback_data: `delc:${encodeURIComponent(name)}` }, { text: '↩️ انصراف', callback_data: 'menu:sessions' }],
+          [btn('🗑 بله، حذف کن', `delc:${encodeURIComponent(name)}`, 'danger'), btn('↩️ انصراف', 'menu:sessions')],
         ];
         return this.render(chatId, messageId, `مطمئنی سشن \`${name}\` حذف شود؟`, kb);
       }
