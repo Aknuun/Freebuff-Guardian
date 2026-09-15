@@ -47,6 +47,7 @@ export class FreebuffChat {
     this.websiteUrl = websiteUrl.replace(/\/$/, '');
     this.agent = agent;
     this.instances = instanceManager;
+    this.lastSession = null; // آخرین سشن شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
   }
 
   headers(extra = {}) {
@@ -63,7 +64,21 @@ export class FreebuffChat {
     const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, { headers: this.headers() });
     if (!res.ok) return null;
     const s = await res.json().catch(() => null);
-    return s?.status === 'active' && s.instanceId ? s : null;
+    if (s?.status === 'active' && s.instanceId) {
+      this.lastSession = s;
+      return s;
+    }
+    this.lastSession = null;
+    return null;
+  }
+
+  /**
+   * زمان باقی‌مانده‌ی سشن به میلی‌ثانیه (زنده، از expiresAt) یا null اگر
+   * سشنی شناخته‌شده نباشد. TTL سمت سرور ثابت است و با چت تمدید نمی‌شود.
+   */
+  remainingMs() {
+    if (!this.lastSession?.expiresAt) return null;
+    return new Date(this.lastSession.expiresAt).getTime() - Date.now();
   }
 
   /** پایان سشن فعلی (برای آزادسازی مدل) */
@@ -106,7 +121,15 @@ export class FreebuffChat {
       err.code = data?.status;
       throw err;
     }
+    this.lastSession = data;
     return data;
+  }
+
+  /** بستن سشن فعلی و ساخت سشن تازه با همان مدل (ریست تایمر ۱ ساعته) */
+  async renewSession(model) {
+    const session = await this.activeSession();
+    if (session) await this.endSession(session.instanceId);
+    return this.admitSession(model || session?.model || this.agent);
   }
 
   /**
@@ -138,11 +161,21 @@ export class FreebuffChat {
     let session = await this.activeSession();
     if (!session) {
       try {
-        session = await this.admitSession(model || this.agent);
+        return await this.admitSession(model || this.agent);
       } catch (e) {
         log.warn('admission ناموفق؛ استفاده از instance محلی:', e.message);
         return { instanceId: this.instances.safeInstanceId().id, model };
       }
+    }
+
+    const left = this.remainingMs();
+    if (left !== null && left <= 60_000) {
+      // نزدیک انقضا؛ پیش از ارسال پیام تمدید می‌کنیم تا وسط درخواست قطع نشود.
+      log.info('سشن نزدیک انقضا بود؛ تمدید شد');
+      session = await this.renewSession(session.model).catch((e) => {
+        log.warn('تمدید ناموفق؛ ادامه با سشن فعلی:', e.message);
+        return session;
+      });
     } else if (model && session.model !== model) {
       session = await this.switchSessionModel(model).catch((e) => {
         log.warn(`سوییچ به ${model} ناموفق؛ ادامه با ${session.model}:`, e.message);

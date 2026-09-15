@@ -29,13 +29,23 @@ import fs from 'node:fs';
 const execp = promisify(exec);
 const log = makeLogger('bot');
 
+/** نمایش خوانای مدت‌زمان میلی‌ثانیه‌ای */
+function humanMs(ms) {
+  if (ms == null) return '—';
+  const total = Math.max(0, Math.round(ms / 60000));
+  if (total < 1) return 'کمتر از ۱ دقیقه';
+  if (total < 60) return `${total} دقیقه`;
+  return `${Math.floor(total / 60)} ساعت و ${total % 60} دقیقه`;
+}
+
 const HELP = `🛡️ *نگهبان فری‌باف*
 
 مدیریت کامل فری‌باف از تلگرام — بدون SSH.
 /menu — منوی دکمه‌ای (ساده‌ترین راه)
 
 *تنظیمات فری‌باف*
-/status — وضعیت کلی
+/status — وضعیت کلی (با تایمر سشن)
+/renew — تمدید سشن (ریست تایمر ۱ ساعته)
 /settings — نمایش تنظیمات
 /mode DEFAULT\\|AGENT\\|PLAN\\|PRINT
 /model — دیدن مدل فعلی
@@ -71,6 +81,15 @@ export class GuardianBot {
       instanceManager: instances,
     });
     this.busy = new Set(); // userId هایی که درخواست پردازشی در جریان دارند
+    this.sessionWarned = false;
+    this.lastProbe = 0;
+
+    // هشدار پیش از انقضای سشن (هر دقیقه بررسی؛ فقط یک‌بار در هر سشن)
+    const warnMin = parseInt(process.env.SESSION_WARN_MIN || '5', 10);
+    if (warnMin > 0) {
+      this.warnTimer = setInterval(() => this.checkSessionWarn(warnMin).catch((e) => log.warn('sessionWarn:', e.message)), 60000);
+      this.warnTimer.unref?.();
+    }
 
     this.bot = new TelegramBot(cfg.telegramToken, { polling: true });
     this.bot.on('message', (msg) => this.onMessage(msg).catch((e) => log.error('onMessage:', e)));
@@ -120,7 +139,10 @@ export class GuardianBot {
         return this.send(chatId, HELP, { reply_markup: { inline_keyboard: [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]] } });
 
       case '/status':
-        return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]] } });
+        return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: this.statusKeyboard() } });
+
+      case '/renew':
+        return this.doRenew(chatId, null);
 
       case '/settings':
         return this.send(chatId, this.settings.summary());
@@ -284,7 +306,9 @@ export class GuardianBot {
   }
 
   homeText(u) {
-    return `🛡️ *نگهبان فری‌باف*\n\nمدل: \`${this.settings.getModel()}\`\nسشن فعال: \`${u.activeSession ?? '—'}\`\n\nاز دکمه‌ها استفاده کن یا مثل قبل پیام بفرست تا چت کند.`;
+    const left = this.chat.remainingMs();
+    const clock = left == null ? '' : `\n⏳ سشن فری‌باف: ${humanMs(left)} دیگر`;
+    return `🛡️ *نگهبان فری‌باف*\n\nمدل: \`${this.settings.getModel()}\`\nسشن فعال: \`${u.activeSession ?? '—'}\`${clock}\n\nاز دکمه‌ها استفاده کن یا مثل قبل پیام بفرست تا چت کند.`;
   }
 
   modelKeyboard() {
@@ -335,10 +359,17 @@ export class GuardianBot {
 
   serverKeyboard() {
     return [
+      [{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }],
       [{ text: '📈 پروسه‌ها', callback_data: 'svc:ps' }],
       [{ text: '♻️ ری‌استارت freebuff', callback_data: 'fb:restart' }, { text: '⏹ توقف CLI', callback_data: 'fb:stop' }],
       [{ text: '🔐 وضعیت instance', callback_data: 'menu:instances' }, { text: '🔓 آزادسازی قفل', callback_data: 'svc:unlock' }],
       [{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
+    ];
+  }
+
+  statusKeyboard() {
+    return [
+      [{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
     ];
   }
 
@@ -348,18 +379,63 @@ export class GuardianBot {
     const mem = `RAM: ${(process.memoryUsage().rss / 1e6).toFixed(0)}MB پروسه / ${(os.totalmem() - os.freemem()) / 1e9 | 0}GB/${os.totalmem() / 1e9 | 0}GB سرور`;
     const up = `Uptime ربات: ${(process.uptime() / 3600).toFixed(1)}h`;
     const fbSession = this.instances.isInteractiveActive() ? 'CLI تعاملی فعال است ⚠️' : 'CLI تعاملی غیرفعال';
-    const model = await this.chat.activeSession().catch(() => null);
-    return [
+    const sess = await this.chat.activeSession().catch(() => null);
+    const left = this.chat.remainingMs();
+    const lines = [
       `📊 *وضعیت*`,
       `🖥 Load: ${load} | ${mem}`,
       `⏱ ${up}`,
       `🤖 مدل: \`${this.settings.getModel()}\``,
-      model ? `🔓 سشن سرور: \`${model.model}\` (${Math.round((model.remainingMs || 0) / 60000)} دقیقه)` : '🔓 سشن سرور: —',
+      sess ? `🔓 سشن سرور: \`${sess.model}\` — ⏳ ${humanMs(left)} دیگر` : '🔓 سشن سرور: — (پیام بعدی سشن تازه می‌سازد)',
       `🎛 مود: ${this.settings.getMode()}`,
       `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`,
       `🔐 ${fbSession}`,
       `💬 سشن فعال: ${this.state.user(userId).activeSession ?? '—'}`,
-    ].join('\n');
+    ];
+    if (sess?.freeWindows) {
+      const w = sess.freeWindows;
+      lines.push(`🎟 سشن رایگان — امروز: ${w.dayUsed}/${w.dayLimit} | هفته: ${w.weekUsed}/${w.weekLimit} | ماه: ${w.monthUsed}/${w.monthLimit}`);
+    }
+    if (sess?.freebucks?.daily) {
+      const d = sess.freebucks.daily;
+      lines.push(`💵 Freebucks امروز: ${d.remaining}/${d.limit}`);
+    }
+    return lines.join('\n');
+  }
+
+  /** بستن سشن فعلی و ساخت سشن تازه (ریست تایمر ۱ ساعته) */
+  async doRenew(chatId, messageId) {
+    const sess = await this.chat.activeSession().catch(() => null);
+    const model = sess?.model || this.settings.getModel();
+    try {
+      await this.chat.renewSession(model);
+      return this.render(chatId, messageId, `✅ سشن \`${model}\` تمدید شد — ⏳ ${humanMs(this.chat.remainingMs())} دیگر`, this.statusKeyboard());
+    } catch (e) {
+      return this.render(chatId, messageId, `❌ ${e.message}`, this.statusKeyboard());
+    }
+  }
+
+  /** هشدار یک‌باره پیش از انقضای سشن */
+  async checkSessionWarn(warnMin) {
+    const left = this.chat.remainingMs();
+    if (left == null) {
+      // سشنی شناخته‌شده نیست؛ هر ۵ دقیقه یک‌بار سرور را بررسی کن
+      if (Date.now() - (this.lastProbe || 0) > 5 * 60000) {
+        this.lastProbe = Date.now();
+        await this.chat.activeSession().catch(() => {});
+      }
+      this.sessionWarned = false;
+      return;
+    }
+    if (left > warnMin * 60000) { this.sessionWarned = false; return; }
+    if (this.sessionWarned) return;
+    this.sessionWarned = true;
+    const text = `⏳ سشن فری‌باف ${humanMs(left)} دیگر بسته می‌شود.\nبرای تمدید /renew بزن، یا پیام بعدی خودکار سشن تازه می‌سازد.`;
+    const kb = { reply_markup: { inline_keyboard: [[{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }]] } };
+    for (const id of this.cfg.allowedUserIds) {
+      const chatId = this.state.user(id).chatId;
+      if (chatId) await this.send(chatId, text, kb).catch(() => {});
+    }
   }
 
   // ---------- روتر دکمه‌ها ----------
@@ -380,7 +456,8 @@ export class GuardianBot {
       case 'menu':
         switch (value) {
           case 'home': return home();
-          case 'status': return this.render(chatId, messageId, await this.statusText(userId), [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
+          case 'status': return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
+          case 'renew': return this.doRenew(chatId, messageId);
           case 'settings': return this.render(chatId, messageId, this.settings.summary(), [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
           case 'model': return this.render(chatId, messageId, `🤖 *مدل‌های رایگان*\nفعلی: \`${this.settings.getModel()}\`\nبرای سوییچ روی مدل بزن.`, this.modelKeyboard());
           case 'mode': return this.render(chatId, messageId, `🎛 *مود* (فعلی: \`${this.settings.getMode()}\`)`, this.modeKeyboard());
