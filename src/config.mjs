@@ -89,6 +89,9 @@ export function loadConfig() {
     fbFingerprintId: fbUser?.fingerprintId ?? `freebuff-guardian-${Date.now().toString(36)}`,
     fbModel,
     fbAgent,
+    // پروفایل‌های اکانت (هر فایل = یک اکانت؛ اکانت پیش‌فرض همان credentials سرور است)
+    accountsDir: process.env.FREEBUFF_ACCOUNTS_DIR || path.join(process.cwd(), 'accounts'),
+    fbDefaultLabel: fbUser?.name || fbUser?.email || 'default',
     websiteUrl: process.env.FREEBUFF_WEBSITE_URL || 'https://www.codebuff.com',
     // محدودیت‌ها
     maxAnswerChars: parseInt(process.env.MAX_ANSWER_CHARS || '3500', 10),

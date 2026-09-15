@@ -49,6 +49,20 @@ export class FreebuffChat {
     this.instances = instanceManager;
     this.lastSession = null; // آخرین سشن شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
     this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی سشن بسته است هم نمایش داده می‌شود)
+    this.accountName = null; // نام اکانت فعال (چند-اکانتی)
+  }
+
+  /** تغییر اکانت فعال؛ چون سشن/سهمیه per-account است، کش پاک می‌شود */
+  useAccount(account) {
+    if (!account?.authToken) return false;
+    if (this.accountName === account.name) return false;
+    this.accountName = account.name;
+    this.authToken = account.authToken;
+    this.fingerprintId = account.fingerprintId ?? null;
+    this.lastSession = null;
+    this.lastQuota = null;
+    log.info('اکانت فعال تغییر کرد:', account.name);
+    return true;
   }
 
   /** ذخیره‌ی سهمیه‌ی سشن برای نمایش حتی بعد از بسته‌شدن سشن */

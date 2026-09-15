@@ -22,6 +22,7 @@ import { makeLogger } from './logger.mjs';
 import { freeAgentForModel, freeModels } from './config.mjs';
 import { FreebuffSettings } from './settings.mjs';
 import { FreebuffChat } from './chat.mjs';
+import { AccountStore } from './accounts.mjs';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
@@ -51,6 +52,7 @@ const HELP = `🛡️ *نگهبان فری‌باف*
 /model — دیدن مدل فعلی
 /model provider/model — تغییر مدل (سشن را سوییچ می‌کند)
 /models — لیست مدل‌های رایگان
+/account — مدیریت اکانت‌های فری‌باف (تعویض/افزودن)
 /ads on\\|off — تبلیغات
 
 *چت با فری‌باف*
@@ -74,12 +76,24 @@ export class GuardianBot {
     this.state = state;
     this.instances = instances;
     this.settings = new FreebuffSettings();
+    this.accounts = new AccountStore({
+      dir: cfg.accountsDir,
+      defaults: {
+        authToken: cfg.fbAuthToken,
+        fingerprintId: cfg.fbFingerprintId,
+        userId: cfg.fbUser?.id ?? null,
+        email: cfg.fbUser?.email ?? null,
+        label: cfg.fbDefaultLabel,
+      },
+    });
+    this.pendingAdd = new Map(); // userId → نام اکانتی که منتظر JSON آن هستیم
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
       agent: cfg.fbAgent,
       instanceManager: instances,
     });
+    this.applyActiveAccount();
     this.busy = new Set(); // userId هایی که درخواست پردازشی در جریان دارند
     this.sessionWarned = false;
     this.lastProbe = 0;
@@ -101,6 +115,41 @@ export class GuardianBot {
   }
 
   allowed(id) { return this.cfg.allowedUserIds.includes(id); }
+
+  // ---------- اکانت‌ها ----------
+  activeAccountName() { return this.state.getMeta('activeAccount') || 'default'; }
+
+  activeAccount() { return this.accounts.get(this.activeAccountName()) || this.accounts.get('default'); }
+
+  /** اکانت فعال را روی موتور چت اعمال می‌کند */
+  applyActiveAccount() {
+    const acc = this.activeAccount();
+    if (acc) this.chat.useAccount(acc);
+    return acc;
+  }
+
+  accountText() {
+    const list = this.accounts.list();
+    return [
+      '👤 *اکانت‌های فری‌باف*',
+      `فعال: \`${this.activeAccountName()}\``,
+      `${list.length} اکانت`,
+      '',
+      'برای تعویض روی اکانت بزن.',
+      'افزودن: `/account add <name>` و بعد فرستادن محتوای `credentials.json`.',
+    ].join('\n');
+  }
+
+  accountKeyboard() {
+    const active = this.activeAccountName();
+    const rows = this.accounts.list().map((a) => {
+      const label = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
+      return [{ text: `${a.name === active ? '✅ ' : ''}${label}`, callback_data: `acc:${a.name}` }];
+    });
+    rows.push([{ text: '➕ افزودن اکانت', callback_data: 'acc:add' }]);
+    rows.push([{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    return rows;
+  }
 
   async send(chatId, text, extra = {}) {
     try {
@@ -175,6 +224,28 @@ export class GuardianBot {
           const left = session.remainingMs ? `\n⏳ باقیمانده سشن: ${Math.round(session.remainingMs / 60000)} دقیقه` : '';
           return this.send(chatId, `✅ مدل روی \`${arg}\` تنظیم شد${agent ? `\nایجنت رایگان: \`${agent}\`` : ''}${left}`);
         } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
+      }
+
+      case '/account': {
+        const [sub, name] = arg.split(/\s+/);
+        if (!arg) return this.send(chatId, this.accountText(), { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+        if (sub === 'use') {
+          if (!this.accounts.has(name)) return this.send(chatId, '❌ اکانت پیدا نشد.');
+          this.state.setMeta('activeAccount', name);
+          this.applyActiveAccount();
+          return this.send(chatId, `✅ اکانت فعال: \`${name}\`\n${await this.statusText(userId)}`, { reply_markup: { inline_keyboard: this.statusKeyboard() } });
+        }
+        if (sub === 'add') {
+          if (!name) return this.send(chatId, 'استفاده: /account add <name>');
+          this.pendingAdd.set(userId, name);
+          return this.send(chatId, `📥 حالا محتوای فایل \`credentials.json\` اکانت «${name}» را بفرست.`);
+        }
+        if (sub === 'del') {
+          try { this.accounts.remove(name); } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
+          if (this.activeAccountName() === name) { this.state.setMeta('activeAccount', 'default'); this.applyActiveAccount(); }
+          return this.send(chatId, `🗑 اکانت \`${name}\` حذف شد.`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+        }
+        return this.send(chatId, 'استفاده: /account | /account use <n> | /account add <n> | /account del <n>');
       }
 
       case '/models':
@@ -309,6 +380,7 @@ export class GuardianBot {
       [
         { text: `💬 سشن‌ها (${u.activeSession ?? '—'})`, callback_data: 'menu:sessions' },
         { text: '⚙️ تنظیمات', callback_data: 'menu:settings' },
+        { text: `👤 ${this.activeAccountName()}`, callback_data: 'menu:account' },
       ],
       [{ text: '➕ سشن جدید', callback_data: 'menu:new' }, { text: '🧹 پاک‌کردن تاریخچه', callback_data: 'menu:clear' }],
       [{ text: '🖥 سرور', callback_data: 'menu:server' }, { text: '❓ راهنما', callback_data: 'menu:help' }],
@@ -323,6 +395,7 @@ export class GuardianBot {
       `🎛 مود: \`${this.settings.getMode()}\``,
       `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`,
       `🤖 مدل: \`${this.settings.getModel()}\``,
+      `👤 اکانت فعال: \`${this.activeAccountName()}\``,
       `⏰ هشدار انقضای سشن: ${warn}`,
     ].join('\n');
   }
@@ -336,6 +409,7 @@ export class GuardianBot {
         { text: `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, callback_data: 'menu:ads' },
       ],
       [{ text: `🤖 مدل: ${this.settings.getModel()}`, callback_data: 'menu:model' }],
+      [{ text: `👤 اکانت: ${this.activeAccountName()}`, callback_data: 'menu:account' }],
       [
         { text: `${mark(0)}خاموش`, callback_data: 'warn:0' },
         { text: `${mark(2)}۲د`, callback_data: 'warn:2' },
@@ -416,6 +490,7 @@ export class GuardianBot {
   }
 
   async statusText(userId) {
+    this.applyActiveAccount();
     const os = await import('node:os');
     const load = os.loadavg().map((n) => n.toFixed(2)).join(' / ');
     const mem = `RAM: ${(process.memoryUsage().rss / 1e6).toFixed(0)}MB پروسه / ${(os.totalmem() - os.freemem()) / 1e9 | 0}GB/${os.totalmem() / 1e9 | 0}GB سرور`;
@@ -449,6 +524,7 @@ export class GuardianBot {
 
   /** بستن سشن فعلی و ساخت سشن تازه (ریست تایمر ۱ ساعته) */
   async doRenew(chatId, messageId) {
+    this.applyActiveAccount();
     const sess = await this.chat.activeSession().catch(() => null);
     const model = sess?.model || this.settings.getModel();
     try {
@@ -461,8 +537,9 @@ export class GuardianBot {
 
   /** هشدار یک‌باره پیش از انقضای سشن */
   async checkSessionWarn() {
+    if (this.warnMin <= 0) { this.sessionWarned = false; return; }
+    this.applyActiveAccount();
     const warnMin = this.warnMin;
-    if (warnMin <= 0) { this.sessionWarned = false; return; }
     const left = this.chat.remainingMs();
     if (left == null) {
       // سشنی شناخته‌شده نیست؛ هر ۵ دقیقه یک‌بار سرور را بررسی کن
@@ -506,6 +583,7 @@ export class GuardianBot {
           case 'timer': return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
           case 'renew': return this.doRenew(chatId, messageId);
           case 'settings': return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
+          case 'account': return this.render(chatId, messageId, this.accountText(), this.accountKeyboard());
           case 'start': {
             const sess = await this.chat.activeSession().catch(() => null);
             if (!sess) {
@@ -562,6 +640,25 @@ export class GuardianBot {
         this.settings.setAds(value === 'on');
         await answer(`تبلیغات ${value === 'on' ? 'روشن' : 'خاموش'} شد`);
         return this.render(chatId, messageId, '📢 *تبلیغات*', this.adsKeyboard());
+      }
+
+      case 'acc': {
+        if (value === 'add') {
+          return this.render(chatId, messageId, [
+            '➕ *افزودن اکانت*',
+            '',
+            '۱) دستور `/account add <name>` را بفرست (مثلاً `friend1`).',
+            '۲) بعد محتوای کامل فایل `credentials.json` آن اکانت را پیست کن.',
+          ].join('\n'), [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
+        }
+        if (!this.accounts.has(value)) {
+          await answer('اکانت پیدا نشد');
+          return this.render(chatId, messageId, this.accountText(), this.accountKeyboard());
+        }
+        this.state.setMeta('activeAccount', value);
+        this.applyActiveAccount();
+        await answer(`اکانت فعال: ${value}`);
+        return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
       }
 
       case 'warn': {
@@ -634,12 +731,32 @@ export class GuardianBot {
     }
   }
 
+  /** دریافت JSON اکانت پس از /account add */
+  async handleAccountJson(chatId, userId, text) {
+    const name = this.pendingAdd.get(userId);
+    this.pendingAdd.delete(userId);
+    let raw;
+    try {
+      raw = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
+    } catch {
+      return this.send(chatId, '❌ JSON نامعتبر بود. دوباره `/account add <name>` بزن.');
+    }
+    try {
+      const acc = this.accounts.add(name, raw);
+      return this.send(chatId, `✅ اکانت \`${acc.name}\` اضافه شد. برای فعال‌کردن روی آن بزن.`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+    } catch (e) {
+      return this.send(chatId, `❌ ${e.message}`);
+    }
+  }
+
   // ---------- چت ----------
   async onChat(msg, chatId, userId, text) {
+    if (this.pendingAdd.has(userId)) return this.handleAccountJson(chatId, userId, text);
     if (this.busy.has(userId)) {
       return this.send(chatId, '⏳ هنوز پاسخ قبلی در جریان است…');
     }
-    if (!this.cfg.fbAuthToken) {
+    this.applyActiveAccount();
+    if (!this.activeAccount()?.authToken) {
       return this.send(chatId, '❌ credentials فری‌باف پیدا نشد. اول در سرور freebuff login کن.');
     }
 

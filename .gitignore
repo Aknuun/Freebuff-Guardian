@@ -2,6 +2,9 @@ node_modules/
 .env
 *.log
 
+# اکانت‌های فری‌باف (توکن‌های حساس)
+accounts/
+
 # state و قفل‌های runtime
 state.json
 state.json.bak*
