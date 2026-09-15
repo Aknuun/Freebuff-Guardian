@@ -48,6 +48,14 @@ export class FreebuffChat {
     this.agent = agent;
     this.instances = instanceManager;
     this.lastSession = null; // آخرین سشن شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
+    this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی سشن بسته است هم نمایش داده می‌شود)
+  }
+
+  /** ذخیره‌ی سهمیه‌ی سشن برای نمایش حتی بعد از بسته‌شدن سشن */
+  cacheQuota(session) {
+    if (session?.freeWindows || session?.freebucks) {
+      this.lastQuota = { freeWindows: session.freeWindows, freebucks: session.freebucks, at: Date.now() };
+    }
   }
 
   headers(extra = {}) {
@@ -66,6 +74,7 @@ export class FreebuffChat {
     const s = await res.json().catch(() => null);
     if (s?.status === 'active' && s.instanceId) {
       this.lastSession = s;
+      this.cacheQuota(s);
       return s;
     }
     this.lastSession = null;
@@ -122,6 +131,7 @@ export class FreebuffChat {
       throw err;
     }
     this.lastSession = data;
+    this.cacheQuota(data);
     return data;
   }
 

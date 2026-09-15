@@ -31,6 +31,18 @@ export class StateStore {
     }
   }
 
+  // --- تنظیمات سراسری (مثل دقیقهٔ هشدار انقضا) ---
+  getMeta(key) {
+    return (this.data.meta ?? {})[key];
+  }
+
+  setMeta(key, value) {
+    if (!this.data.meta) this.data.meta = {};
+    this.data.meta[key] = value;
+    this.save();
+    return value;
+  }
+
   user(userId) {
     if (!this.data.users[userId]) {
       this.data.users[userId] = {

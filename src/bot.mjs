@@ -84,12 +84,13 @@ export class GuardianBot {
     this.sessionWarned = false;
     this.lastProbe = 0;
 
+    // دقیقهٔ هشدار انقضا: از state خوانده می‌شود و از طریق تنظیمات قابل تغییر است
+    const fromState = state.getMeta('sessionWarnMin');
+    this.warnMin = parseInt(fromState ?? process.env.SESSION_WARN_MIN ?? '5', 10) || 0;
+
     // هشدار پیش از انقضای سشن (هر دقیقه بررسی؛ فقط یک‌بار در هر سشن)
-    const warnMin = parseInt(process.env.SESSION_WARN_MIN || '5', 10);
-    if (warnMin > 0) {
-      this.warnTimer = setInterval(() => this.checkSessionWarn(warnMin).catch((e) => log.warn('sessionWarn:', e.message)), 60000);
-      this.warnTimer.unref?.();
-    }
+    this.warnTimer = setInterval(() => this.checkSessionWarn().catch((e) => log.warn('sessionWarn:', e.message)), 60000);
+    this.warnTimer.unref?.();
 
     this.bot = new TelegramBot(cfg.telegramToken, { polling: true });
     this.bot.on('message', (msg) => this.onMessage(msg).catch((e) => log.error('onMessage:', e)));
@@ -145,7 +146,7 @@ export class GuardianBot {
         return this.doRenew(chatId, null);
 
       case '/settings':
-        return this.send(chatId, this.settings.summary());
+        return this.send(chatId, this.settingsText(), { reply_markup: { inline_keyboard: this.settingsKeyboard() } });
 
       case '/mode': {
         if (!arg) return this.send(chatId, `مود فعلی: \`${this.settings.getMode()}\`\nاستفاده: /mode DEFAULT|AGENT|PLAN|PRINT`);
@@ -291,17 +292,58 @@ export class GuardianBot {
     return this.send(chatId, text, markup);
   }
 
+  /** متن دکمهٔ ثابت تایمر در پایین منو */
+  timerButtonText() {
+    const left = this.chat.remainingMs();
+    if (left == null) return '⏳ سشن بسته — ▶️ استارت';
+    return `⏳ سشن: ${humanMs(left)}`;
+  }
+
   homeKeyboard(u) {
     return [
-      [{ text: '📊 وضعیت', callback_data: 'menu:status' }, { text: '⚙️ تنظیمات', callback_data: 'menu:settings' }],
-      [{ text: `🤖 مدل: ${this.settings.getModel()}`, callback_data: 'menu:model' }],
+      [
+        { text: '📊 وضعیت', callback_data: 'menu:status' },
+        { text: '▶️ استارت', callback_data: 'menu:start' },
+        { text: '🤖 مدل', callback_data: 'menu:model' },
+      ],
+      [
+        { text: `💬 سشن‌ها (${u.activeSession ?? '—'})`, callback_data: 'menu:sessions' },
+        { text: '⚙️ تنظیمات', callback_data: 'menu:settings' },
+      ],
+      [{ text: '➕ سشن جدید', callback_data: 'menu:new' }, { text: '🧹 پاک‌کردن تاریخچه', callback_data: 'menu:clear' }],
+      [{ text: '🖥 سرور', callback_data: 'menu:server' }, { text: '❓ راهنما', callback_data: 'menu:help' }],
+      [{ text: this.timerButtonText(), callback_data: 'menu:timer' }],
+    ];
+  }
+
+  settingsText() {
+    const warn = this.warnMin > 0 ? `${this.warnMin} دقیقه قبل از انقضا` : 'خاموش';
+    return [
+      '⚙️ *تنظیمات*',
+      `🎛 مود: \`${this.settings.getMode()}\``,
+      `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`,
+      `🤖 مدل: \`${this.settings.getModel()}\``,
+      `⏰ هشدار انقضای سشن: ${warn}`,
+    ].join('\n');
+  }
+
+  settingsKeyboard() {
+    const warn = this.warnMin;
+    const mark = (n) => (warn === n ? '✅ ' : '');
+    return [
       [
         { text: `🎛 مود: ${this.settings.getMode()}`, callback_data: 'menu:mode' },
         { text: `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, callback_data: 'menu:ads' },
       ],
-      [{ text: `💬 سشن‌ها (فعال: ${u.activeSession ?? '—'})`, callback_data: 'menu:sessions' }],
-      [{ text: '➕ سشن جدید', callback_data: 'menu:new' }, { text: '🧹 پاک‌کردن تاریخچه', callback_data: 'menu:clear' }],
-      [{ text: '🖥 سرور', callback_data: 'menu:server' }, { text: '❓ راهنما', callback_data: 'menu:help' }],
+      [{ text: `🤖 مدل: ${this.settings.getModel()}`, callback_data: 'menu:model' }],
+      [
+        { text: `${mark(0)}خاموش`, callback_data: 'warn:0' },
+        { text: `${mark(2)}۲د`, callback_data: 'warn:2' },
+        { text: `${mark(5)}۵د`, callback_data: 'warn:5' },
+        { text: `${mark(10)}۱۰د`, callback_data: 'warn:10' },
+      ],
+      [{ text: '🔄 تمدید سشن', callback_data: 'menu:renew' }],
+      [{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
     ];
   }
 
@@ -314,7 +356,7 @@ export class GuardianBot {
   modelKeyboard() {
     const cur = this.settings.getModel();
     const rows = freeModels().map((m) => [{ text: `${m === cur ? '✅ ' : ''}${m}`, callback_data: `model:${m}` }]);
-    rows.push([{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    rows.push([{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
     return rows;
   }
 
@@ -325,7 +367,7 @@ export class GuardianBot {
     for (let i = 0; i < modes.length; i += 2) {
       rows.push(modes.slice(i, i + 2).map((m) => ({ text: `${m === cur ? '✅ ' : ''}${m}`, callback_data: `mode:${m}` })));
     }
-    rows.push([{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
+    rows.push([{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]);
     return rows;
   }
 
@@ -333,7 +375,7 @@ export class GuardianBot {
     const on = this.settings.getAds();
     return [
       [{ text: `${on ? '✅ ' : ''}روشن`, callback_data: 'ads:on' }, { text: `${!on ? '✅ ' : ''}خاموش`, callback_data: 'ads:off' }],
-      [{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
+      [{ text: '↩️ تنظیمات', callback_data: 'menu:settings' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }],
     ];
   }
 
@@ -392,12 +434,14 @@ export class GuardianBot {
       `🔐 ${fbSession}`,
       `💬 سشن فعال: ${this.state.user(userId).activeSession ?? '—'}`,
     ];
-    if (sess?.freeWindows) {
-      const w = sess.freeWindows;
-      lines.push(`🎟 سشن رایگان — امروز: ${w.dayUsed}/${w.dayLimit} | هفته: ${w.weekUsed}/${w.weekLimit} | ماه: ${w.monthUsed}/${w.monthLimit}`);
+    const quota = sess ?? this.chat.lastQuota;
+    if (quota?.freeWindows) {
+      const w = quota.freeWindows;
+      const tag = sess ? '' : ' (آخرین ثبت)';
+      lines.push(`🎟 سشن رایگان${tag} — امروز: ${w.dayUsed}/${w.dayLimit} | هفته: ${w.weekUsed}/${w.weekLimit} | ماه: ${w.monthUsed}/${w.monthLimit}`);
     }
-    if (sess?.freebucks?.daily) {
-      const d = sess.freebucks.daily;
+    if (quota?.freebucks?.daily) {
+      const d = quota.freebucks.daily;
       lines.push(`💵 Freebucks امروز: ${d.remaining}/${d.limit}`);
     }
     return lines.join('\n');
@@ -416,7 +460,9 @@ export class GuardianBot {
   }
 
   /** هشدار یک‌باره پیش از انقضای سشن */
-  async checkSessionWarn(warnMin) {
+  async checkSessionWarn() {
+    const warnMin = this.warnMin;
+    if (warnMin <= 0) { this.sessionWarned = false; return; }
     const left = this.chat.remainingMs();
     if (left == null) {
       // سشنی شناخته‌شده نیست؛ هر ۵ دقیقه یک‌بار سرور را بررسی کن
@@ -456,9 +502,21 @@ export class GuardianBot {
       case 'menu':
         switch (value) {
           case 'home': return home();
-          case 'status': return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
+          case 'status':
+          case 'timer': return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
           case 'renew': return this.doRenew(chatId, messageId);
-          case 'settings': return this.render(chatId, messageId, this.settings.summary(), [[{ text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
+          case 'settings': return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
+          case 'start': {
+            const sess = await this.chat.activeSession().catch(() => null);
+            if (!sess) {
+              await answer('⏳ ساخت سشن…');
+              try { await this.chat.renewSession(this.settings.getModel()); }
+              catch (e) { await answer(e.message); }
+            } else {
+              await answer('سشن فعال است');
+            }
+            return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
+          }
           case 'model': return this.render(chatId, messageId, `🤖 *مدل‌های رایگان*\nفعلی: \`${this.settings.getModel()}\`\nبرای سوییچ روی مدل بزن.`, this.modelKeyboard());
           case 'mode': return this.render(chatId, messageId, `🎛 *مود* (فعلی: \`${this.settings.getMode()}\`)`, this.modeKeyboard());
           case 'ads': return this.render(chatId, messageId, '📢 *تبلیغات*', this.adsKeyboard());
@@ -504,6 +562,14 @@ export class GuardianBot {
         this.settings.setAds(value === 'on');
         await answer(`تبلیغات ${value === 'on' ? 'روشن' : 'خاموش'} شد`);
         return this.render(chatId, messageId, '📢 *تبلیغات*', this.adsKeyboard());
+      }
+
+      case 'warn': {
+        this.warnMin = parseInt(value, 10) || 0;
+        this.state.setMeta('sessionWarnMin', this.warnMin);
+        this.sessionWarned = false;
+        await answer(this.warnMin > 0 ? `هشدار روی ${this.warnMin} دقیقه تنظیم شد` : 'هشدار خاموش شد');
+        return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
       }
 
       case 'ses': {
