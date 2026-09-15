@@ -30,6 +30,12 @@ import fs from 'node:fs';
 const execp = promisify(exec);
 const log = makeLogger('bot');
 
+/** نام اکانت را از اطلاعات کاربر می‌سازد (ASCII و امن برای نام فایل) */
+function accountSlug(user) {
+  const base = String(user?.email || user?.name || '').toLowerCase();
+  return base.split('@')[0].replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+
 /** نمایش خوانای مدت‌زمان میلی‌ثانیه‌ای */
 function humanMs(ms) {
   if (ms == null) return '—';
@@ -87,6 +93,7 @@ export class GuardianBot {
       },
     });
     this.pendingAdd = new Map(); // userId → نام اکانتی که منتظر JSON آن هستیم
+    this.pendingName = new Map(); // userId → منتظر نام دلخواه اکانت هستیم
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
@@ -136,17 +143,28 @@ export class GuardianBot {
       `فعال: \`${this.activeAccountName()}\``,
       `${list.length} اکانت`,
       '',
-      'برای تعویض روی اکانت بزن.',
-      'افزودن: `/account add <name>` و بعد فرستادن محتوای `credentials.json`.',
+      'برای تعویض، روی اکانت بزن.',
+      'برای افزودن، دکمهٔ «➕ افزودن اکانت» را بزن.',
     ].join('\n');
+  }
+
+  /** انتخاب نام نهایی اکانت (اگر نام دلخواه داده نشده باشد از اطلاعات کاربر) */
+  nextAccountName(preferred, user) {
+    let name = (preferred && String(preferred).trim()) || accountSlug(user) || 'account';
+    name = String(name).replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'account';
+    if (name === 'default' || this.accounts.has(name)) name = `${name}-${Date.now().toString(36).slice(-4)}`;
+    return name;
   }
 
   /** شروع ورود وب برای افزودن اکانت (همان مکانیزم CLI login) */
   async startWebLogin(chatId, userId, name) {
-    if (!/^[\w.-]{1,40}$/.test(name) || name === 'default') {
+    const valid = !!name && /^[\w.-]{1,40}$/.test(name) && name !== 'default';
+    if (name && !valid) {
       return this.send(chatId, '❌ نام اکانت نامعتبر است (حروف/عدد/.-_ و نه default).');
     }
-    const fingerprintId = `freebuff-guardian-${name}-${Date.now().toString(36)}`;
+    const fingerprintId = valid
+      ? `freebuff-guardian-${name}-${Date.now().toString(36)}`
+      : `freebuff-guardian-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     let code;
     try {
       code = await this.chat.startCliLogin(fingerprintId);
@@ -158,7 +176,7 @@ export class GuardianBot {
     if (prev?.timer) clearInterval(prev.timer);
 
     const deadline = Math.min(Date.now() + 10 * 60000, code.expiresAt || 0) || Date.now() + 10 * 60000;
-    const st = { name, fingerprintId: code.fingerprintId || fingerprintId, fingerprintHash: code.fingerprintHash, expiresAt: code.expiresAt };
+    const st = { name: valid ? name : null, fingerprintId: code.fingerprintId || fingerprintId, fingerprintHash: code.fingerprintHash, expiresAt: code.expiresAt };
     st.timer = setInterval(() => this.checkWebLogin(chatId, userId, deadline).catch(() => {}), 5000);
     st.timer.unref?.();
     this.pendingLogin.set(userId, st);
@@ -171,7 +189,8 @@ export class GuardianBot {
         ],
       },
     };
-    return this.send(chatId, `🌐 *افزودن اکانت «${name}»*\n\nاین لینک را باز کن، در سایت فری‌باف لاگین کن و تأیید کن:\n\n${code.loginUrl}\n\n⏳ منتظر تأیید هستم…`, kb);
+    const title = st.name ? `«${st.name}»` : 'جدید';
+    return this.send(chatId, `🌐 *افزودن اکانت ${title}*\n\n۱) دکمهٔ «🔗 باز کردن صفحهٔ ورود» را بزن.\n۲) در سایت فری‌باف لاگین کن و تأیید کن.\n\n⏳ منتظر تأیید هستم…`, kb);
   }
 
   /** بررسی دوره‌ای ورود وب */
@@ -181,7 +200,7 @@ export class GuardianBot {
     if (Date.now() > deadline || (st.expiresAt && Date.now() > st.expiresAt)) {
       clearInterval(st.timer);
       this.pendingLogin.delete(userId);
-      return this.send(chatId, `⌛ زمان ورود اکانت «${st.name}» تمام شد. دوباره /account add بزن.`);
+      return this.send(chatId, `⌛ زمان ورود اکانت ${st.name ? `«${st.name}»` : ''} تمام شد. دوباره «➕ افزودن اکانت» را بزن.`);
     }
     let r;
     try { r = await this.chat.pollCliLogin(st); } catch { return; }
@@ -189,7 +208,8 @@ export class GuardianBot {
     clearInterval(st.timer);
     this.pendingLogin.delete(userId);
     try {
-      const acc = this.accounts.add(st.name, {
+      const finalName = st.name || this.nextAccountName(null, r.user);
+      const acc = this.accounts.add(finalName, {
         default: {
           id: r.user.id,
           name: r.user.name,
@@ -199,10 +219,21 @@ export class GuardianBot {
           fingerprintHash: r.user.fingerprintHash || st.fingerprintHash,
         },
       });
-      return this.send(chatId, `✅ اکانت \`${acc.name}\` اضافه شد. برای فعال‌کردن روی آن بزن.`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+      return this.send(chatId, `✅ اکانت \`${acc.name}\` ${acc.email ? `(${acc.email}) ` : ''}اضافه شد. برای فعال‌کردن روی آن بزن.`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
     } catch (e) {
       return this.send(chatId, `❌ ${e.message}`);
     }
+  }
+
+  /** انتخاب روش افزودن اکانت (نام اختیاری) */
+  accountMethodKeyboard(name = '') {
+    const suffix = `:${name}`;
+    return [
+      [{ text: '🌐 ورود با وب', callback_data: `accweb${suffix}` }],
+      [{ text: '📋 پیست credentials.json', callback_data: `accjson${suffix}` }],
+      [{ text: '✏️ با نام دلخواه', callback_data: 'accnamed' }],
+      [{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }],
+    ];
   }
 
   accountKeyboard() {
@@ -301,17 +332,8 @@ export class GuardianBot {
           return this.send(chatId, `✅ اکانت فعال: \`${name}\`\n${await this.statusText(userId)}`, { reply_markup: { inline_keyboard: this.statusKeyboard() } });
         }
         if (sub === 'add') {
-          if (!name) return this.send(chatId, 'استفاده: /account add <name>');
-          const kb = {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🌐 ورود با وب', callback_data: `accweb:${name}` }],
-                [{ text: '📋 پیست credentials.json', callback_data: `accjson:${name}` }],
-                [{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }],
-              ],
-            },
-          };
-          return this.send(chatId, `افزودن اکانت «${name}» — روش را انتخاب کن:`, kb);
+          const msg = name ? `افزودن اکانت «${name}» — روش را انتخاب کن:` : '➕ *افزودن اکانت*\nروش را انتخاب کن (نام خودکار از ایمیل ساخته می‌شود):';
+          return this.send(chatId, msg, { reply_markup: { inline_keyboard: this.accountMethodKeyboard(name) } });
         }
         if (sub === 'del') {
           try { this.accounts.remove(name); } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
@@ -717,14 +739,7 @@ export class GuardianBot {
 
       case 'acc': {
         if (value === 'add') {
-          return this.render(chatId, messageId, [
-            '➕ *افزودن اکانت*',
-            '',
-            'دستور `/account add <name>` را بفرست (مثلاً `friend1`).',
-            'بعد انتخاب کن:',
-            '• 🌐 *ورود با وب* — لینک لاگین سایت را می‌دهد؛ لازم نیست چیزی روی سرور نصب شود.',
-            '• 📋 *پیست credentials.json* — اگر فایل را داری.',
-          ].join('\n'), [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }, { text: '🏠 منوی اصلی', callback_data: 'menu:home' }]]);
+          return this.render(chatId, messageId, '➕ *افزودن اکانت*\nروش را انتخاب کن (نام خودکار از ایمیل ساخته می‌شود):', this.accountMethodKeyboard());
         }
         if (!this.accounts.has(value)) {
           await answer('اکانت پیدا نشد');
@@ -735,6 +750,10 @@ export class GuardianBot {
         await answer(`اکانت فعال: ${value}`);
         return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
       }
+
+      case 'accnamed':
+        this.pendingName.set(userId, true);
+        return this.render(chatId, messageId, '✏️ نام اکانت را بفرست (حروف/عدد/`.-_`)…', [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }]]);
 
       case 'accweb':
         return this.startWebLogin(chatId, userId, value);
@@ -821,17 +840,28 @@ export class GuardianBot {
     }
   }
 
+  /** دریافت نام دلخواه اکانت */
+  async handleNameInput(chatId, userId, text) {
+    this.pendingName.delete(userId);
+    const name = text.trim();
+    if (!/^[\w.-]{1,40}$/.test(name) || name === 'default') {
+      return this.send(chatId, '❌ نام نامعتبر. فقط حروف/عدد/`.-_` (و نه default). دوباره «➕ افزودن اکانت» را بزن.');
+    }
+    return this.send(chatId, `افزودن اکانت «${name}» — روش را انتخاب کن:`, { reply_markup: { inline_keyboard: this.accountMethodKeyboard(name) } });
+  }
+
   /** دریافت JSON اکانت پس از /account add */
   async handleAccountJson(chatId, userId, text) {
-    const name = this.pendingAdd.get(userId);
+    const preferred = this.pendingAdd.get(userId) || null;
     this.pendingAdd.delete(userId);
     let raw;
     try {
       raw = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
     } catch {
-      return this.send(chatId, '❌ JSON نامعتبر بود. دوباره `/account add <name>` بزن.');
+      return this.send(chatId, '❌ JSON نامعتبر بود. دوباره «➕ افزودن اکانت» را بزن.');
     }
     try {
+      const name = this.nextAccountName(preferred, raw?.default ?? raw);
       const acc = this.accounts.add(name, raw);
       return this.send(chatId, `✅ اکانت \`${acc.name}\` اضافه شد. برای فعال‌کردن روی آن بزن.`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
     } catch (e) {
@@ -841,6 +871,7 @@ export class GuardianBot {
 
   // ---------- چت ----------
   async onChat(msg, chatId, userId, text) {
+    if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
     if (this.pendingAdd.has(userId)) return this.handleAccountJson(chatId, userId, text);
     if (this.busy.has(userId)) {
       return this.send(chatId, '⏳ هنوز پاسخ قبلی در جریان است…');
