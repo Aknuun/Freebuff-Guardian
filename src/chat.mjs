@@ -209,6 +209,20 @@ export class FreebuffChat {
     return session;
   }
 
+  /** خواندن سشن/سهمیه یک اکانت دلخواه (بدون دست‌زدن به کش چت) */
+  async accountQuota(account) {
+    if (!account?.authToken) return null;
+    try {
+      const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, {
+        headers: { Authorization: `Bearer ${account.authToken}` },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   /** شروع فرایند ورود (مثل CLI): لینک ورود وب را برمی‌گرداند */
   async startCliLogin(fingerprintId) {
     const res = await fetch(`${this.websiteUrl}/api/auth/cli/code`, {
