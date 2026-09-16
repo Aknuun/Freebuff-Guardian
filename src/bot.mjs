@@ -1479,6 +1479,8 @@ export class GuardianBot {
       case 'toolno': {
         const resolve = this.pendingConfirm.get(value);
         if (resolve) { this.pendingConfirm.delete(value); resolve(String(q.data).startsWith('toolok')); }
+        // پیام تأیید دستور خطرناک، در هر دو حالت (اجرا یا لغو) حذف شود.
+        await this.bot.deleteMessage(chatId, messageId).catch(() => {});
         await answer(String(q.data).startsWith('toolok') ? this.tr('در حال اجرا…', 'Running…') : this.tr('لغو شد', 'Cancelled'));
         return;
       }
