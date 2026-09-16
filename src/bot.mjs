@@ -2029,6 +2029,8 @@ export class GuardianBot {
       const { message } = await this.chat.rawComplete({ model, messages, tools, signal });
       const reasoning = String(message?.reasoning_content || message?.reasoning || '').trim();
       if (reasoning) thoughts += (thoughts ? '\n\n' : '') + reasoning;
+      // تفکرات تازه را همان لحظه نشان بده (حتی وقتی ابزاری صدا نمی‌شود)
+      if (reasoning && onStep) await onStep({ thoughts, toolLog }).catch(() => {});
       const calls = message?.tool_calls;
       if (Array.isArray(calls) && calls.length) {
         messages.push({ role: 'assistant', content: message.content || '', tool_calls: calls });
@@ -2194,21 +2196,32 @@ export class GuardianBot {
     const controller = new AbortController();
     this.aborters.set(userId, controller);
     const signal = controller.signal;
-    const status = await this.send(chatId, this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…'), {
+    const status = await this.send(chatId, this.tr('⏱ ۰ ثانیه · 🧠 در حال فکر کردن…', '⏱ 0s · 🧠 Thinking…'), {
       reply_markup: { inline_keyboard: [[btn(this.tr('⏹ توقف', '⏹ Stop'), 'runstop', 'danger')]] },
     });
     const statusId = status.message_id;
-    const renderProgress = async (toolLog) => {
-      const body = toolLog?.length
-        ? this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + toolLog.map((t) => '• ' + t).join('\n')
-        : this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…');
+    const startedAt = Date.now();
+    let lastThoughts = '';
+    let lastToolLog = [];
+    const renderProgress = async () => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      let body = this.tr(`⏱ ${secs} ثانیه · 🧠 در حال فکر کردن…`, `⏱ ${secs}s · 🧠 Thinking…`);
+      if (lastThoughts) {
+        const t = lastThoughts.length > 3200 ? '…\n' + lastThoughts.slice(-3200) : lastThoughts;
+        body += '\n\n' + t;
+      }
+      if (lastToolLog.length) {
+        body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
+      }
       await this.bot.editMessageText(body.slice(0, 3900), { chat_id: chatId, message_id: statusId }).catch(() => {});
     };
+    const tick = setInterval(() => { renderProgress(); }, 2000);
+    tick.unref?.();
     try {
       const history = session.messages.slice(-16);
       const sys = this.cfg.serverTools
-        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزارهای run_terminal_command، read_file، list_directory و write_file داری و می‌توانی هر کاری روی سرور انجام دهی. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have run_terminal_command, read_file, list_directory and write_file tools and can do anything on the server. Be concise.')
-        : this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant. Be concise.');
+        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزارهای run_terminal_command، read_file، list_directory و write_file داری و می‌توانی هر کاری روی سرور انجام دهی. کوتاه، دقیق و فارسی جواب بده. همهٔ افکار و استدلال‌هایت را هم قدم‌به‌قدم و به فارسی بنویس.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have run_terminal_command, read_file, list_directory and write_file tools and can do anything on the server. Be concise.')
+        : this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده. همهٔ افکار و استدلال‌هایت را هم قدم‌به‌قدم و به فارسی بنویس.', 'You are Freebuff Guardian, a technical assistant. Be concise.');
       const messages = [
         { role: 'system', content: sys },
         ...history,
@@ -2217,7 +2230,11 @@ export class GuardianBot {
 
       let answer;
       if (this.cfg.serverTools) {
-        const res = await this.agentLoop(chatId, userId, messages, ({ toolLog }) => renderProgress(toolLog), signal);
+        const res = await this.agentLoop(chatId, userId, messages, ({ thoughts, toolLog }) => {
+          lastThoughts = thoughts || '';
+          lastToolLog = toolLog || [];
+          return renderProgress();
+        }, signal);
         answer = res.answer;
       } else {
         answer = await this.chat.complete({ model: this.settings.getModel(), messages, signal });
@@ -2265,6 +2282,7 @@ export class GuardianBot {
       await this.send(chatId, `❌ ${hint.slice(0, 900)}`, extra).catch(() => {});
       if (!this.isQuotaError(e)) await this.maybeSendRenew(chatId);
     } finally {
+      clearInterval(tick);
       this.aborters.delete(userId);
       this.busy.delete(userId);
     }
