@@ -21,7 +21,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { makeLogger } from './logger.mjs';
 import { freeAgentForModel, freeModels } from './config.mjs';
 import { FreebuffSettings } from './settings.mjs';
-import { FreebuffChat } from './chat.mjs';
+import { FreebuffChat, abortError } from './chat.mjs';
 import { AccountStore } from './accounts.mjs';
 import { AccountBackup } from './backup.mjs';
 import { exec } from 'node:child_process';
@@ -163,6 +163,7 @@ export class GuardianBot {
     });
     this.applyActiveAccount();
     this.busy = new Set(); // userId هایی که درخواست پردازشی در جریان دارند
+    this.aborters = new Map(); // userId → AbortController برای توقف پروسهٔ در حال اجرا
     this.menuMsg = new Map(); // chatId → id آخرین منوی دکمه‌دار (برای پاک‌سازی خودکار)
     this.replyShown = new Set(); // chatId هایی که کیبورد ثابت برایشان فرستاده شده
     this.sessionWarned = false;
@@ -1482,6 +1483,20 @@ export class GuardianBot {
         return;
       }
 
+      case 'runstop': {
+        this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+        const ac = this.aborters.get(userId);
+        if (!ac) { await answer(this.tr('چیزی در حال اجرا نیست', 'Nothing is running')); return; }
+        ac.abort();
+        await answer(this.tr('⏹ متوقف شد', '⏹ Stopped'));
+        return;
+      }
+      case 'runcont': {
+        this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+        await answer(this.tr('▶️ ادامه می‌دهد…', '▶️ Continuing…'));
+        return;
+      }
+
       case 'chatNew': {
         const pend = this.pendingChat.get(userId);
         this.pendingChat.delete(userId);
@@ -1839,7 +1854,15 @@ export class GuardianBot {
     if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
     if (this.pendingProxy.has(userId)) return this.handleProxyInput(chatId, userId, text);
     if (this.busy.has(userId)) {
-      return this.send(chatId, this.tr('⏳ هنوز پاسخ قبلی در جریان است…', '⏳ The previous answer is still in progress…'));
+      return this.send(chatId, this.tr(
+        '⏳ یک پاسخ هنوز در حال اجراست.\nمی‌خواهی متوقفش کنم یا ادامه بدهم؟',
+        '⏳ A previous answer is still running.\nShould I stop it or continue?',
+      ), {
+        reply_markup: { inline_keyboard: [[
+          btn(this.tr('⏹ متوقف کن', '⏹ Stop'), 'runstop', 'danger'),
+          btn(this.tr('▶️ ادامه بده', '▶️ Continue'), 'runcont', 'success'),
+        ]] },
+      });
     }
     this.applyActiveAccount();
     if (this.hasNoAccount()) {
@@ -1914,10 +1937,14 @@ export class GuardianBot {
   }
 
   /** تأیید دستور خطرناک با دکمه */
-  confirmTool(chatId, userId, command) {
+  confirmTool(chatId, userId, command, signal) {
     return new Promise((resolve) => {
+      if (signal?.aborted) return resolve(false);
       const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       this.pendingConfirm.set(id, resolve);
+      if (signal?.addEventListener) {
+        signal.addEventListener('abort', () => { if (this.pendingConfirm.delete(id)) resolve(false); }, { once: true });
+      }
       const kb = { keep: true, reply_markup: { inline_keyboard: [[
         btn(this.tr('✅ اجرا کن', '✅ Run'), `toolok:${id}`, 'success'),
         btn(this.tr('❌ لغو', '❌ Cancel'), `toolno:${id}`, 'danger'),
@@ -1932,7 +1959,8 @@ export class GuardianBot {
   }
 
   /** اجرای ابزار درخواستی مدل و برگرداندن نتیجه به‌صورت متن */
-  async executeTool(chatId, userId, call) {
+  async executeTool(chatId, userId, call, signal) {
+    if (signal?.aborted) throw abortError();
     const name = call?.function?.name;
     let args = {};
     try { args = JSON.parse(call?.function?.arguments || '{}'); } catch { /* args نامعتبر */ }
@@ -1944,12 +1972,12 @@ export class GuardianBot {
         const cmd = String(args.command || '').trim();
         if (!cmd) return 'error: empty command';
         if (isDangerousCommand(cmd)) {
-          const ok = await this.confirmTool(chatId, userId, cmd);
+          const ok = await this.confirmTool(chatId, userId, cmd, signal);
           if (!ok) return 'The user declined to run this command. Ask before retrying.';
         }
         const timeout = (Number(args.timeoutSec) || this.cfg.cmdTimeoutSec || 60) * 1000;
         try {
-          const { stdout, stderr } = await execp(cmd, { timeout, maxBuffer: 2e6, cwd: abs(args.cwd) });
+          const { stdout, stderr } = await execp(cmd, { timeout, maxBuffer: 2e6, cwd: abs(args.cwd), ...(signal ? { signal } : {}) });
           return (`${stdout}${stderr ? `\nSTDERR:\n${stderr}` : ''}`.trim() || '(no output)').slice(0, 6000);
         } catch (e) {
           const out = `${e.stdout || ''}${e.stderr ? `\nSTDERR:\n${e.stderr}` : ''}`.trim();
@@ -1987,20 +2015,23 @@ export class GuardianBot {
   }
 
   /** حلقهٔ ابزار: مدل فکر و دستور می‌خواهد، ما اجرا می‌کنیم و نتیجه را برمی‌گردانیم */
-  async agentLoop(chatId, userId, messages, onStep) {
+  async agentLoop(chatId, userId, messages, onStep, signal) {
     const model = this.settings.getModel();
     const tools = this.serverTools();
-    const MAX_STEPS = 8;
+    const MAX_STEPS = Math.max(1, parseInt(process.env.FREEBUFF_MAX_STEPS || '12', 10) || 12);
     let thoughts = '';
     const toolLog = [];
+    let emptyRetried = false;
     for (let step = 0; step < MAX_STEPS; step++) {
-      const { message } = await this.chat.rawComplete({ model, messages, tools });
+      if (signal?.aborted) throw abortError();
+      const { message } = await this.chat.rawComplete({ model, messages, tools, signal });
       const reasoning = String(message?.reasoning_content || message?.reasoning || '').trim();
       if (reasoning) thoughts += (thoughts ? '\n\n' : '') + reasoning;
       const calls = message?.tool_calls;
       if (Array.isArray(calls) && calls.length) {
         messages.push({ role: 'assistant', content: message.content || '', tool_calls: calls });
         for (const call of calls) {
+          if (signal?.aborted) throw abortError();
           let desc = call?.function?.name || 'tool';
           try {
             const a = JSON.parse(call?.function?.arguments || '{}');
@@ -2008,12 +2039,23 @@ export class GuardianBot {
           } catch { /* ignore */ }
           toolLog.push(desc);
           if (onStep) await onStep({ thoughts, toolLog }).catch(() => {});
-          const result = await this.executeTool(chatId, userId, call);
+          const result = await this.executeTool(chatId, userId, call, signal);
           messages.push({ role: 'tool', tool_call_id: call.id, name: call?.function?.name, content: String(result) });
         }
         continue;
       }
-      return { answer: (message?.content || '').toString(), thoughts, toolLog };
+      let content = (message?.content || '').toString().trim();
+      if (!content && !emptyRetried) {
+        // مدل بدون ابزار و بدون متن تمام کرد (اغلب توکن‌ها صرف reasoning شده)؛
+        // یک بار دیگر فقط برای گرفتن پاسخ نهایی امتحان کن.
+        emptyRetried = true;
+        messages.push({ role: 'assistant', content: '' });
+        messages.push({ role: 'user', content: this.tr('حالا فقط پاسخ نهایی را بنویس؛ ابزار دیگری لازم نیست.', 'Now output only the final answer; no more tools.') });
+        continue;
+      }
+      // اگر متن نهایی خالی بود ولی reasoning داشتیم، از reasoning استفاده کن تا کاربر پیام خالی نگیرد.
+      if (!content && reasoning) content = reasoning;
+      return { answer: content, thoughts, toolLog };
     }
     return { answer: this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)'), thoughts, toolLog };
   }
@@ -2147,7 +2189,12 @@ export class GuardianBot {
 
   async runChat(chatId, userId, name, session, text, attempt = 0) {
     this.busy.add(userId);
-    const status = await this.send(chatId, this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…'));
+    const controller = new AbortController();
+    this.aborters.set(userId, controller);
+    const signal = controller.signal;
+    const status = await this.send(chatId, this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…'), {
+      reply_markup: { inline_keyboard: [[btn(this.tr('⏹ توقف', '⏹ Stop'), 'runstop', 'danger')]] },
+    });
     const statusId = status.message_id;
     const renderProgress = async (toolLog) => {
       const body = toolLog?.length
@@ -2168,11 +2215,14 @@ export class GuardianBot {
 
       let answer;
       if (this.cfg.serverTools) {
-        const res = await this.agentLoop(chatId, userId, messages, ({ toolLog }) => renderProgress(toolLog));
+        const res = await this.agentLoop(chatId, userId, messages, ({ toolLog }) => renderProgress(toolLog), signal);
         answer = res.answer;
       } else {
-        answer = await this.chat.complete({ model: this.settings.getModel(), messages });
+        answer = await this.chat.complete({ model: this.settings.getModel(), messages, signal });
       }
+
+      // دکمهٔ توقف دیگر لازم نیست
+      await this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: statusId }).catch(() => {});
 
       this.state.pushMessage(userId, name, { role: 'user', content: text });
       this.state.pushMessage(userId, name, { role: 'assistant', content: answer });
@@ -2191,6 +2241,13 @@ export class GuardianBot {
       await this.send(chatId, out);
       await this.maybeSendRenew(chatId);
     } catch (e) {
+      // توقف دستی توسط کاربر (دکمهٔ «⏹ توقف»)
+      if (e?.name === 'AbortError' || e?.code === 'aborted' || signal.aborted) {
+        log.info('چت توسط کاربر متوقف شد');
+        await this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: statusId }).catch(() => {});
+        await this.bot.editMessageText(this.tr('⏹ اجرا متوقف شد.', '⏹ Run stopped.'), { chat_id: chatId, message_id: statusId }).catch(() => {});
+        return;
+      }
       log.error('چت ناموفق:', e);
       // سهمیهٔ این اکانت تمام شده؟ خودکار روی اکانت بعدی برو و یک‌بار دیگر امتحان کن.
       if (this.isQuotaError(e) && attempt === 0) {
@@ -2206,6 +2263,7 @@ export class GuardianBot {
       await this.send(chatId, `❌ ${hint.slice(0, 900)}`, extra).catch(() => {});
       if (!this.isQuotaError(e)) await this.maybeSendRenew(chatId);
     } finally {
+      this.aborters.delete(userId);
       this.busy.delete(userId);
     }
   }

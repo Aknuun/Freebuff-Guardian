@@ -28,6 +28,14 @@ const log = makeLogger('chat');
 // بعد از این جمله می‌آیند.
 const FREE_MODE_SYSTEM_PREFIX = 'You are Buffy, the coding agent behind Codebuff.';
 
+/** خطای «توسط کاربر متوقف شد» (AbortError) برای تشخیص راحت در لایهٔ بالاتر */
+export function abortError() {
+  const e = new Error('aborted by user');
+  e.name = 'AbortError';
+  e.code = 'aborted';
+  return e;
+}
+
 /** اگر پیام system با پیشوند لازم شروع نشده باشد، آن را اضافه می‌کند */
 function withCliSystemPrompt(messages) {
   const idx = messages.findIndex((m) => m.role === 'system');
@@ -329,11 +337,12 @@ export class FreebuffChat {
   }
 
   /** شروع یک run جدید؛ runId برای متادیتای چت لازم است */
-  async startRun(agentId = this.agent) {
+  async startRun(agentId = this.agent, signal) {
     const res = await this.req(`${this.websiteUrl}/api/v1/agent-runs`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ action: 'START', agentId, ancestorRunIds: [] }),
+      ...(signal ? { signal } : {}),
     });
     if (!res.ok) {
       const t = await res.text();
@@ -370,8 +379,9 @@ export class FreebuffChat {
    * یک درخواست خام به chat/completions؛ پیام assistant کامل (شامل tool_calls)
    * را برمی‌گرداند تا حلقهٔ ابزار در لایهٔ بالاتر اجرا شود.
    */
-  async rawComplete({ model, messages, tools, maxTokens = 2048, agent }, retry = true) {
+  async rawComplete({ model, messages, tools, maxTokens = 4096, agent, signal }, retry = true) {
     if (!this.authToken) throw new Error('احراز هویت فری‌باف تنظیم نشده است');
+    if (signal?.aborted) throw abortError();
     // جلسه معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
     // همان جلسه admitted باشد وگرنه 409 session_superseded.
     const session = await this.resolveSession(model);
@@ -380,25 +390,33 @@ export class FreebuffChat {
     // free_mode_invalid_agent_model برمی‌گردد.
     const agentId = agent || freeAgentForModel(useModel) || this.agent;
 
-    const runId = await this.startRun(agentId);
+    const runId = await this.startRun(agentId, signal);
     log.info('run شروع شد', runId, `instance=${session.instanceId}`, `agent=${agentId}`);
 
-    const res = await this.req(`${this.websiteUrl}/api/v1/chat/completions`, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({
-        model: useModel,
-        messages: withCliSystemPrompt(messages),
-        max_tokens: maxTokens,
-        ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
-        codebuff_metadata: {
-          run_id: runId,
-          cost_mode: 'free',
-          agent_id: agentId,
-          freebuff_instance_id: session.instanceId,
-        },
-      }),
-    });
+    let res;
+    try {
+      res = await this.req(`${this.websiteUrl}/api/v1/chat/completions`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({
+          model: useModel,
+          messages: withCliSystemPrompt(messages),
+          max_tokens: maxTokens,
+          ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
+          codebuff_metadata: {
+            run_id: runId,
+            cost_mode: 'free',
+            agent_id: agentId,
+            freebuff_instance_id: session.instanceId,
+          },
+        }),
+        ...(signal ? { signal } : {}),
+      });
+    } catch (e) {
+      // اگر کاربر وسط درخواست توقف زد، run را روی سرور ببند تا باز نماند.
+      await this.finishRun(runId, e?.name === 'AbortError' ? 'aborted' : 'error');
+      throw e;
+    }
 
     const text = await res.text();
     if (!res.ok) {
@@ -408,7 +426,7 @@ export class FreebuffChat {
         log.warn('جلسه منقضی شده بود (428)؛ تمدید و تلاش دوباره');
         // اگر تمدید شکست خورد (مثلاً سهمیه تمام است) همان خطا را نشان بده.
         await this.renewSession(useModel);
-        return this.rawComplete({ model, messages, tools, maxTokens, agent }, false);
+        return this.rawComplete({ model, messages, tools, maxTokens, agent, signal }, false);
       }
       const err = new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);
       err.status = res.status;
@@ -419,16 +437,19 @@ export class FreebuffChat {
     await this.finishRun(runId);
 
     let message = {};
+    let finishReason = null;
     try {
       const data = JSON.parse(text);
-      message = data.choices?.[0]?.message ?? { content: '' };
+      const choice = data.choices?.[0];
+      message = choice?.message ?? { content: '' };
+      finishReason = choice?.finish_reason ?? null;
       if (Array.isArray(message.content)) {
         message.content = message.content.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('');
       }
     } catch {
       message = { content: text.slice(0, 2000) };
     }
-    return { message };
+    return { message, finishReason };
   }
 
   /** پاسخ متنی ساده (بدون ابزار) */
