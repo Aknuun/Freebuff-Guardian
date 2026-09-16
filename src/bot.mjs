@@ -168,6 +168,7 @@ export class GuardianBot {
     this.replyShown = new Set(); // chatId هایی که کیبورد ثابت برایشان فرستاده شده
     this.sessionWarned = false;
     this.lastProbe = 0;
+    this.tgFloodUntil = 0; // تا این زمان به‌خاطر 429 تلگرام درخواست نمی‌فرستیم
     this.renewTimer = null; // تایمر تمدید خودکار جلسه
     this.autoRenewOn = state.getMeta('autoRenew') === true;
 
@@ -586,12 +587,59 @@ export class GuardianBot {
     await this.bot.deleteMessage(chatId, id).catch(() => {});
   }
 
+  /** آیا الان در محدودیت flood تلگرام هستیم؟ */
+  tgFlooded() { return Date.now() < this.tgFloodUntil; }
+
+  /** ثبت خطای 429 تلگرام و تنظیم مدت انتظار؛ true اگر خطای flood بود */
+  noteTgError(e) {
+    const retry = e?.response?.body?.parameters?.retry_after
+      ?? Number((String(e?.message || '').match(/retry after (\d+)/i) || [])[1])
+      ?? 0;
+    if (e?.response?.statusCode === 429 || retry) {
+      this.tgFloodUntil = Date.now() + (retry || 5) * 1000 + 1000;
+      log.warn(`محدودیت تلگرام (429)؛ ${retry || 5} ثانیه صبر می‌کنیم`);
+      return true;
+    }
+    return false;
+  }
+
+  /** ویرایش پیام با رعایت محدودیت flood (در زمان flood نادیده گرفته می‌شود) */
+  async editText(chatId, messageId, text, extra = {}) {
+    if (this.tgFlooded()) return false;
+    try {
+      await this.bot.editMessageText(text, { chat_id: chatId, message_id: messageId, ...extra });
+      return true;
+    } catch (e) {
+      if (!this.noteTgError(e)) log.warn('ویرایش پیام ناموفق:', e.message);
+      return false;
+    }
+  }
+
+  /** حذف دکمه‌های پیام با رعایت محدودیت flood */
+  async clearMarkup(chatId, messageId) {
+    if (this.tgFlooded()) return false;
+    try {
+      await this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId });
+      return true;
+    } catch (e) {
+      if (!this.noteTgError(e)) log.warn('حذف دکمه ناموفق:', e.message);
+      return false;
+    }
+  }
+
   async send(chatId, text, extra = {}) {
     const { keep, ...opts } = extra;
+    // اگر در flood هستیم، برای پیام‌های مهم تا پایان انتظار صبر کن (حداکثر ۶۰ ثانیه)
+    if (this.tgFlooded()) {
+      const wait = Math.min(60000, this.tgFloodUntil - Date.now());
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    }
     let sent;
     try {
       sent = await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...opts });
-    } catch {
+    } catch (e) {
+      // خطای flood را دوباره بدون Markdown تکرار نکن (فقط بدتر می‌شود)
+      if (this.noteTgError(e)) throw e;
       // Markdown شکسته نباشد
       sent = await this.bot.sendMessage(chatId, text.replace(/[*_`]/g, ''), opts);
     }
@@ -2220,19 +2268,26 @@ export class GuardianBot {
     const startedAt = Date.now();
     let lastThoughts = '';
     let lastToolLog = [];
+    let rendering = false;
     const renderProgress = async () => {
-      const secs = Math.floor((Date.now() - startedAt) / 1000);
-      let body = this.tr(`⏱ ${secs} ثانیه · 🧠 در حال فکر کردن…`, `⏱ ${secs}s · 🧠 Thinking…`);
-      if (lastThoughts) {
-        const t = lastThoughts.length > 3200 ? '…\n' + lastThoughts.slice(-3200) : lastThoughts;
-        body += '\n\n' + t;
+      if (rendering || this.tgFlooded()) return;
+      rendering = true;
+      try {
+        const secs = Math.floor((Date.now() - startedAt) / 1000);
+        let body = this.tr(`⏱ ${secs} ثانیه · 🧠 در حال فکر کردن…`, `⏱ ${secs}s · 🧠 Thinking…`);
+        if (lastThoughts) {
+          const t = lastThoughts.length > 3200 ? '…\n' + lastThoughts.slice(-3200) : lastThoughts;
+          body += '\n\n' + t;
+        }
+        if (lastToolLog.length) {
+          body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
+        }
+        await this.editText(chatId, statusId, body.slice(0, 3900));
+      } finally {
+        rendering = false;
       }
-      if (lastToolLog.length) {
-        body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
-      }
-      await this.bot.editMessageText(body.slice(0, 3900), { chat_id: chatId, message_id: statusId }).catch(() => {});
     };
-    const tick = setInterval(() => { renderProgress(); }, 2000);
+    const tick = setInterval(() => { renderProgress(); }, 4000);
     tick.unref?.();
     try {
       const history = session.messages.slice(-16);
@@ -2258,17 +2313,17 @@ export class GuardianBot {
       }
 
       // دکمهٔ توقف دیگر لازم نیست
-      await this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: statusId }).catch(() => {});
+      await this.clearMarkup(chatId, statusId);
 
       this.state.pushMessage(userId, name, { role: 'user', content: text });
       this.state.pushMessage(userId, name, { role: 'assistant', content: answer });
 
       // پیام بالایی = وضعیت (مدل/زمان مانده/سهمیه) به‌جای تفکرات
-      await this.bot.editMessageText(this.statusBlock(), {
-        chat_id: chatId, message_id: statusId, parse_mode: 'Markdown',
-      }).catch(async () => {
-        await this.bot.editMessageText(this.statusBlock().replace(/[*_`]/g, ''), { chat_id: chatId, message_id: statusId }).catch(() => {});
-      });
+      const statusText = this.statusBlock();
+      const edited = await this.editText(chatId, statusId, statusText, { parse_mode: 'Markdown' });
+      if (!edited && !this.tgFlooded()) {
+        await this.editText(chatId, statusId, statusText.replace(/[*_`]/g, ''));
+      }
 
       const out = answer.length > this.cfg.maxAnswerChars
         ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
@@ -2280,8 +2335,8 @@ export class GuardianBot {
       // توقف دستی توسط کاربر (دکمهٔ «⏹ توقف»)
       if (e?.name === 'AbortError' || e?.code === 'aborted' || signal.aborted) {
         log.info('چت توسط کاربر متوقف شد');
-        await this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: statusId }).catch(() => {});
-        await this.bot.editMessageText(this.tr('⏹ اجرا متوقف شد.', '⏹ Run stopped.'), { chat_id: chatId, message_id: statusId }).catch(() => {});
+        await this.clearMarkup(chatId, statusId);
+        await this.editText(chatId, statusId, this.tr('⏹ اجرا متوقف شد.', '⏹ Run stopped.'));
         return;
       }
       log.error('چت ناموفق:', e);
