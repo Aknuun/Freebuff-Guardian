@@ -91,6 +91,10 @@ export function loadConfig() {
     fbAgent,
     // پروفایل‌های اکانت (هر فایل = یک اکانت؛ اکانت پیش‌فرض همان credentials سرور است)
     accountsDir: process.env.FREEBUFF_ACCOUNTS_DIR || path.join(process.cwd(), 'accounts'),
+    // مسیر credentials خود CLI برای بکاپ/ریستور اکانت default
+    fbCredPath: credPath,
+    // پوشه‌ی فایل‌های بکاپ اکانت‌ها
+    backupDir: process.env.FREEBUFF_BACKUP_DIR || path.join(process.cwd(), 'backups'),
     fbDefaultLabel: fbUser?.name || fbUser?.email || 'default',
     websiteUrl: process.env.FREEBUFF_WEBSITE_URL || 'https://www.codebuff.com',
     // کنترل سرور توسط مدل (اجرای دستور با تأیید فقط برای دستورهای خطرناک)

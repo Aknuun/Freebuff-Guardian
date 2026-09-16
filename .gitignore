@@ -5,6 +5,9 @@ node_modules/
 # اکانت‌های فری‌باف (توکن‌های حساس)
 accounts/
 
+# بکاپ اکانت‌ها (توکن‌های حساس)
+backups/
+
 # state و قفل‌های runtime
 state.json
 state.json.bak*

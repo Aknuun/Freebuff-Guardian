@@ -46,8 +46,11 @@ control over it (and over the server itself) from anywhere.
 - ⚙️ **Settings menu**: response mode, ads on/off, active model, expiry‑warning threshold, and
   **auto-renew session** (warns 5 min before and renews the session automatically; with a cancel button).
 - 👤 **Multiple Freebuff accounts** (shared use): add an account via the official **Web login**
-  flow (no server needed for that account, with a copy-login-link button). The bot can
-  **automatically fail over** to the next account when one runs out of quota.
+  flow (no server needed for that account, with a copy-login-link button). When quota runs out it
+  asks with buttons and, if unanswered within **1 minute**, **fails over automatically** to the next
+  account without cutting the session.
+- 💾 **Account backup/restore**: automatic daily backup plus Backup and Restore-from-file buttons in
+  the Accounts menu.
 - ⏳ **Session timer**: the free session has a fixed **1‑hour** lifetime on the server; the bot shows
   a live countdown (e.g. "51 min left"), warns you before expiry, and shows a **renew** button only near expiry.
 - 💵 **Quota view**: used/left **Freebucks** and the separate session‑count cap, in both the status
@@ -210,10 +213,15 @@ Behaviour:
 - Accounts are stored in `accounts/` (gitignored, permissions `600`). `default` is the server's own
   account and cannot be deleted.
 - Each account has its **own session and Freebucks**.
-- When the active account's quota is exhausted, the bot **switches to the next account
-  automatically**, starts a fresh session, and tells you:
+- When the active account's quota is exhausted, the bot asks:
   `♻️ Account "X" quota is used up; switching to "Y".`
-  This happens on chat errors, session start and renew.
+  with **➡️ Switch to Y** and **❌ Cancel** buttons. If you don't tap within **1 minute**, it
+  switches to the next account **automatically** and the **session is not cut**. This happens on
+  chat errors, session start and renew.
+- **💾 Backup & ♻️ restore accounts**: in the Accounts menu, the backup button creates a JSON file
+  of all accounts (including `default`) and sends it to the chat. The bot also sends a backup
+  **once a day** automatically. To restore, tap "♻️ Restore from file" and send that JSON file in
+  the chat.
 
 Only add accounts whose owner has given permission — adding extra accounts may violate Freebuff's
 rules and risks a ban.
@@ -247,6 +255,7 @@ src/
 ├── settings.mjs   reads/writes Freebuff's settings.json (mode/ads/model)
 ├── instance.mjs   locks & instance handling (avoid takeover)
 ├── accounts.mjs   multiple account profiles (Web login / credentials.json)
+├── backup.mjs     accounts backup/restore as a JSON file
 ├── chat.mjs       session + agent-runs + chat/completions (+ tool support)
 └── bot.mjs        Telegram UI, buttons, agent tools, failover
 ```

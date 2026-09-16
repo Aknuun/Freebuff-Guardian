@@ -53,9 +53,9 @@ export class FreebuffChat {
   }
 
   /** تغییر اکانت فعال؛ چون جلسه/سهمیه per-account است، کش پاک می‌شود */
-  useAccount(account) {
+  useAccount(account, force = false) {
     if (!account?.authToken) return false;
-    if (this.accountName === account.name) return false;
+    if (!force && this.accountName === account.name) return false;
     this.accountName = account.name;
     this.authToken = account.authToken;
     this.fingerprintId = account.fingerprintId ?? null;

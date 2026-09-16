@@ -23,6 +23,7 @@ import { freeAgentForModel, freeModels } from './config.mjs';
 import { FreebuffSettings } from './settings.mjs';
 import { FreebuffChat } from './chat.mjs';
 import { AccountStore } from './accounts.mjs';
+import { AccountBackup } from './backup.mjs';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
@@ -122,11 +123,18 @@ export class GuardianBot {
         label: cfg.fbDefaultLabel,
       },
     });
+    this.backups = new AccountBackup({
+      accountsDir: cfg.accountsDir,
+      credPath: cfg.fbCredPath,
+      backupDir: cfg.backupDir,
+    });
     this.pendingName = new Map(); // userId → منتظر نام دلخواه اکانت هستیم
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
     this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت جلسه است { chatId, text, name }
     this.pendingSh = new Set(); // userId → منتظر دستور شل هستیم
     this.pendingConfirm = new Map(); // id → resolve برای تأیید دستور خطرناک
+    this.pendingRestore = new Set(); // userId → منتظر فایل بکاپ برای ریستور
+    this.pendingSwitch = new Map(); // userId → سوییچ اکانت در انتظار تأیید/انصراف
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
@@ -154,6 +162,12 @@ export class GuardianBot {
     this.bot.on('message', (msg) => this.onMessage(msg).catch((e) => log.error('onMessage:', e)));
     this.bot.on('callback_query', (q) => this.onCallback(q).catch((e) => log.error('onCallback:', e)));
     this.bot.on('polling_error', (e) => log.warn('polling:', e.message));
+
+    // بکاپ خودکار روزانه (روزی یک‌بار فایل بکاپ برای کاربران فرستاده می‌شود)
+    this.backupTimer = setInterval(() => this.maybeDailyBackup().catch((e) => log.warn('backup:', e.message)), 30 * 60000);
+    this.backupTimer.unref?.();
+    const backupBoot = setTimeout(() => this.maybeDailyBackup().catch(() => {}), 60000);
+    backupBoot.unref?.();
 
     log.info('ربات نگهبان فری‌باف آماده است');
   }
@@ -208,10 +222,30 @@ export class GuardianBot {
   activeAccount() { return this.accounts.get(this.activeAccountName()) || this.accounts.get('default'); }
 
   /** اکانت فعال را روی موتور چت اعمال می‌کند */
-  applyActiveAccount() {
+  applyActiveAccount(force = false) {
     const acc = this.activeAccount();
-    if (acc) this.chat.useAccount(acc);
+    if (acc) this.chat.useAccount(acc, force);
     return acc;
+  }
+
+  /** آیا هیچ اکانتی (پیش‌فرض یا فایلی) وصل نیست؟ */
+  hasNoAccount() {
+    return this.accounts.list().length === 0;
+  }
+
+  noAccountText() {
+    return this.tr(
+      '🔌 *هنوز هیچ اکانتی وصل نیست*\n\nبرای استفاده از نگهبان باید یک اکانت فری‌باف وصل کنی:\n۱) دکمهٔ «➕ افزودن اکانت» را بزن.\n۲) «🌐 ورود با وب» را انتخاب کن و در سایت فری‌باف لاگین کن.\n\nتا وقتی اکانت وصل نشود، چت و ساخت جلسه کار نمی‌کند.\nاگر قبلاً بکاپ گرفته‌ای، با «♻️ ریستور از فایل» برگردان.',
+      '🔌 *No account connected yet*\n\nTo use the guardian you must connect a Freebuff account:\n1) Tap "➕ Add account".\n2) Choose "🌐 Web login" and sign in on the Freebuff site.\n\nUntil an account is connected, chat and sessions will not work.\nIf you backed up before, restore it with "♻️ Restore from file".',
+    );
+  }
+
+  noAccountKeyboard() {
+    return [
+      [btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success')],
+      [btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary')],
+      [btn(this.tr('❓ راهنما', '❓ Help'), 'menu:help', 'primary')],
+    ];
   }
 
   async accountText() {
@@ -357,8 +391,79 @@ export class GuardianBot {
       return [btn(`${a.name === active ? '✅ ' : ''}${label}`, `acc:${a.name}`, a.name === active ? 'success' : 'primary')];
     });
     rows.push([btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success')]);
+    rows.push([
+      btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
+      btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
+    ]);
     rows.push([btn(this.tr('↩️ تنظیمات', '↩️ Settings'), 'menu:settings'), btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')]);
     return rows;
+  }
+
+  // ---------- بکاپ / ریستور اکانت‌ها ----------
+  /** ارسال فایل بکاپ به یک چت */
+  async sendBackup(chatId, file, count) {
+    const caption = this.tr(
+      `💾 *بکاپ اکانت‌های فری‌باف*\n${count} اکانت — برای ریستور، همین فایل را از «👤 اکانت‌ها → ♻️ ریستور از فایل» بفرست.`,
+      `💾 *Freebuff accounts backup*\n${count} accounts — to restore, send this file via "👤 Accounts → ♻️ Restore from file".`,
+    );
+    try {
+      await this.bot.sendDocument(chatId, file, { caption, parse_mode: 'Markdown' });
+      return true;
+    } catch (e) {
+      log.warn('ارسال بکاپ ناموفق:', e.message);
+      await this.send(chatId, this.tr(`❌ ارسال فایل بکاپ ناموفق بود: ${e.message}`, `❌ Failed to send backup file: ${e.message}`)).catch(() => {});
+      return false;
+    }
+  }
+
+  /** یک‌بار در روز بکاپ می‌سازد و برای کاربران می‌فرستد */
+  async maybeDailyBackup() {
+    if (this.hasNoAccount()) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (this.state.getMeta('lastBackupDate') === today) return;
+    const info = this.backups.create();
+    const total = info.count + (info.hasDefault ? 1 : 0);
+    this.state.setMeta('lastBackupDate', today);
+    this.state.setMeta('lastBackupFile', info.name);
+    for (const id of this.cfg.allowedUserIds) {
+      const chatId = this.state.user(id).chatId;
+      if (chatId) await this.sendBackup(chatId, info.file, total);
+    }
+    log.info(`بکاپ روزانه ساخته شد: ${info.name} (${total} اکانت)`);
+  }
+
+  /** ریستور از محتوای فایل بکاپ */
+  async onDocument(msg, chatId, userId) {
+    if (!this.pendingRestore.has(userId)) {
+      return this.send(chatId, this.tr(
+        'برای ریستور، اول از «👤 اکانت‌ها → ♻️ ریستور از فایل» استفاده کن.',
+        'To restore, first use "👤 Accounts → ♻️ Restore from file".',
+      ));
+    }
+    const doc = msg.document || {};
+    if (!/\.json$/i.test(doc.file_name || '') && !/json/i.test(doc.mime_type || '')) {
+      return this.send(chatId, this.tr('❌ فایل باید JSON بکاپ باشد.', '❌ The file must be a JSON backup.'));
+    }
+    this.pendingRestore.delete(userId);
+    try {
+      const link = await this.bot.getFileLink(doc.file_id);
+      const res = await fetch(link);
+      if (!res.ok) throw new Error(`دانلود فایل ناموفق (${res.status})`);
+      const text = await res.text();
+      const r = this.backups.restore(text);
+      if (r.defaultCreds) {
+        this.accounts.setDefault(r.defaultCreds);
+        this.applyActiveAccount(true);
+      } else {
+        this.applyActiveAccount();
+      }
+      return this.send(chatId, this.tr(
+        `✅ ریستور انجام شد.\n• افزوده: ${r.added}\n• به‌روزرسانی: ${r.updated}\n• اکانت default: ${r.defaultCreds ? 'بازیابی شد' : 'در بکاپ نبود'}`,
+        `✅ Restore done.\n• Added: ${r.added}\n• Updated: ${r.updated}\n• Default account: ${r.defaultCreds ? 'restored' : 'not in backup'}`,
+      ), { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+    } catch (e) {
+      return this.send(chatId, `❌ ${e.message}`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+    }
   }
 
   /** حذف آخرین منوی دکمه‌دار این چت تا چت شلوغ نشود */
@@ -392,6 +497,8 @@ export class GuardianBot {
     const userId = msg.from?.id;
     if (!chatId || !userId || !this.allowed(userId)) return; // سکوت برای غریبه‌ها
 
+    if (msg.document) return this.onDocument(msg, chatId, userId);
+
     const text = (msg.text || '').trim();
     if (!text) return;
 
@@ -412,6 +519,9 @@ export class GuardianBot {
       case '/start':
       case '/menu':
         await this.showReplyKeyboard(chatId);
+        if (this.hasNoAccount()) {
+          return this.send(chatId, this.noAccountText(), { reply_markup: { inline_keyboard: this.noAccountKeyboard() } });
+        }
         return this.render(chatId, null, this.homeText(u), this.homeKeyboard(u));
 
       case '/help':
@@ -421,7 +531,7 @@ export class GuardianBot {
         return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: this.statusKeyboard() } });
 
       case '/renew':
-        return this.doRenew(chatId, null);
+        return this.doRenew(chatId, null, userId);
 
       case '/settings':
         return this.send(chatId, this.settingsText(), { reply_markup: { inline_keyboard: this.settingsKeyboard() } });
@@ -459,7 +569,10 @@ export class GuardianBot {
 
       case '/account': {
         const [sub, name] = arg.split(/\s+/);
-        if (!arg) return this.send(chatId, await this.accountText(), { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+        if (!arg) {
+          if (this.hasNoAccount()) return this.send(chatId, this.noAccountText(), { reply_markup: { inline_keyboard: this.noAccountKeyboard() } });
+          return this.send(chatId, await this.accountText(), { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+        }
         if (sub === 'use') {
           if (!this.accounts.has(name)) return this.send(chatId, this.tr('❌ اکانت پیدا نشد.', '❌ Account not found.'));
           this.state.setMeta('activeAccount', name);
@@ -998,7 +1111,7 @@ export class GuardianBot {
   }
 
   /** بستن جلسه فعلی و ساخت جلسه تازه (ریست تایمر ۱ ساعته) */
-  async doRenew(chatId, messageId) {
+  async doRenew(chatId, messageId, userId) {
     this.cancelAutoRenew(); // تمدید دستی جای تایمر خودکار را می‌گیرد
     this.applyActiveAccount();
     const sess = await this.chat.activeSession().catch(() => null);
@@ -1009,7 +1122,7 @@ export class GuardianBot {
     } catch (e) {
       // سهمیهٔ این اکانت تمام شده؟ خودکار روی اکانت بعدی سوییچ و تمدید کن.
       if (this.isQuotaError(e)) {
-        const switched = await this.tryFailover(chatId, model);
+        const switched = await this.tryFailover(chatId, model, userId);
         if (switched) {
           try {
             await this.chat.renewSession(model);
@@ -1128,7 +1241,9 @@ export class GuardianBot {
 
     const [action, ...rest] = (q.data || '').split(':');
     const value = rest.join(':');
-    const home = () => this.render(chatId, messageId, this.homeText(u), this.homeKeyboard(u));
+    const home = () => (this.hasNoAccount()
+      ? this.render(chatId, messageId, this.noAccountText(), this.noAccountKeyboard())
+      : this.render(chatId, messageId, this.homeText(u), this.homeKeyboard(u)));
 
     switch (action) {
       case 'menu':
@@ -1136,7 +1251,7 @@ export class GuardianBot {
           case 'home': return home();
           case 'status':
           case 'timer': return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
-          case 'renew': return this.doRenew(chatId, messageId);
+          case 'renew': return this.doRenew(chatId, messageId, userId);
           case 'settings': return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
           case 'autorenew': {
             this.setAutoRenew(!this.autoRenewOn);
@@ -1150,7 +1265,9 @@ export class GuardianBot {
             await answer(this.tr('تمدید خودکار لغو شد', 'Auto-renew cancelled'));
             return this.render(chatId, messageId, this.tr('🛑 تمدید خودکار لغو شد. جلسه در موعدش بسته می‌شود.', '🛑 Auto-renew cancelled. The session will close at its expiry.'), [[btn(this.tr('⚙️ تنظیمات', '⚙️ Settings'), 'menu:settings', 'primary')]]);
           }
-          case 'account': return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+          case 'account':
+            if (this.hasNoAccount()) return this.render(chatId, messageId, this.noAccountText(), this.noAccountKeyboard());
+            return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
 
           case 'start': {
             const sess = await this.chat.activeSession().catch(() => null);
@@ -1239,7 +1356,7 @@ export class GuardianBot {
           await this.chat.renewSession(this.settings.getModel());
         } catch (e) {
           // سهمیهٔ این اکانت تمام؟ خودکار برو روی اکانت بعدی
-          const switched = this.isQuotaError(e) ? await this.tryFailover(chatId, this.settings.getModel()) : null;
+          const switched = this.isQuotaError(e) ? await this.tryFailover(chatId, this.settings.getModel(), userId) : null;
           if (!switched) {
             const kb = this.isQuotaError(e) ? this.quotaErrorButtons() : this.homeKeyboard(u);
             return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: kb } });
@@ -1250,9 +1367,49 @@ export class GuardianBot {
         return this.runChat(chatId, userId, pend.name, session, pend.text);
       }
 
+      case 'switch': {
+        const st = this.pendingSwitch.get(userId);
+        if (!st) { await answer(this.tr('درخواست سوییچی نیست', 'No pending switch')); return; }
+        clearTimeout(st.timer);
+        this.pendingSwitch.delete(userId);
+        this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+        if (value === 'go') {
+          await answer(this.tr('در حال سوییچ…', 'Switching…'));
+          st.resolve(true);
+        } else {
+          await answer(this.tr('لغو شد', 'Cancelled'));
+          await this.bot.editMessageText(this.tr('❌ سوییچ اکانت لغو شد.', '❌ Account switch cancelled.'), { chat_id: chatId, message_id: messageId }).catch(() => {});
+          st.resolve(false);
+        }
+        return;
+      }
+
       case 'acc': {
         if (value === 'add') {
           return this.render(chatId, messageId, this.tr('➕ *افزودن اکانت*\nروش را انتخاب کن (نام خودکار از ایمیل ساخته می‌شود):', '➕ *Add account*\nChoose a method (name auto-derived from email):'), this.accountMethodKeyboard());
+        }
+        if (value === 'backup') {
+          const info = this.backups.create();
+          this.state.setMeta('lastBackupFile', info.name);
+          await this.sendBackup(chatId, info.file, info.count + (info.hasDefault ? 1 : 0));
+          await answer(this.tr('بکاپ گرفته شد', 'Backup created'));
+          if (this.hasNoAccount()) return home();
+          return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+        }
+        if (value === 'restore') {
+          this.pendingRestore.add(userId);
+          return this.render(chatId, messageId, this.tr(
+            '♻️ *ریستور اکانت‌ها*\nفایل بکاپ (JSON) را همین‌جا در چت بفرست تا ریستور کنم.\n⚠️ اکانت‌های هم‌نام جایگزین می‌شوند.',
+            '♻️ *Restore accounts*\nSend the JSON backup file right here in the chat and I will restore it.\n⚠️ Same-named accounts will be overwritten.',
+          ), [
+            [btn(this.tr('❌ انصراف', '❌ Cancel'), 'acc:restorecancel', 'danger')],
+            [btn(this.tr('↩️ اکانت‌ها', '↩️ Accounts'), 'menu:account')],
+          ]);
+        }
+        if (value === 'restorecancel') {
+          this.pendingRestore.delete(userId);
+          await answer(this.tr('لغو شد', 'Cancelled'));
+          return home();
         }
         if (!this.accounts.has(value)) {
           await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
@@ -1654,26 +1811,79 @@ export class GuardianBot {
     ];
   }
 
-  /**
-   * وقتی سهمیهٔ اکانت فعلی تمام شد، خودکار روی اکانت بعدی (round-robin) سوییچ
-   * می‌کند و یک جلسهٔ تازه می‌سازد. نام اکانت جدید را برمی‌گرداند یا null.
-   */
-  async tryFailover(chatId, model) {
+  /** ترتیب اکانت‌های بعدی برای failover (round-robin از اکانت فعلی) */
+  failoverOrder(cur) {
     const list = this.accounts.list().map((a) => a.name);
-    const cur = this.activeAccountName();
-    if (list.length < 2) return null;
     const idx = Math.max(0, list.indexOf(cur));
+    const out = [];
     for (let k = 1; k < list.length; k++) {
       const name = list[(idx + k) % list.length];
+      if (name !== cur && !out.includes(name)) out.push(name);
+    }
+    return out;
+  }
+
+  /**
+   * وقتی سهمیه تمام شد: اگر userId بدهی، اول با دکمه از کاربر می‌پرسد و در
+   * صورت بی‌جوابی تا ۱ دقیقه خودکار می‌رود؛ بدون userId (تمدید خودکار) مستقیم.
+   * نام اکانت جدید را برمی‌گرداند یا null.
+   */
+  async tryFailover(chatId, model, userId) {
+    const cur = this.activeAccountName();
+    const order = this.failoverOrder(cur);
+    if (!order.length) return null;
+    if (!userId || !chatId) return this.performFailover(chatId, model, order, false);
+    const go = await this.promptSwitch(chatId, userId, cur, order[0]);
+    if (!go) return null;
+    return this.performFailover(chatId, model, order, true);
+  }
+
+  /** پیام «سهمیه تمام شده» با دکمهٔ رفتن/انصراف و تایم‌اوت ۱ دقیقه‌ای */
+  promptSwitch(chatId, userId, from, to) {
+    const prev = this.pendingSwitch.get(userId);
+    if (prev) {
+      clearTimeout(prev.timer);
+      this.pendingSwitch.delete(userId);
+      prev.resolve(false);
+    }
+    return new Promise((resolve) => {
+      const st = { chatId, to, resolve, timer: null };
+      st.timer = setTimeout(() => {
+        if (this.pendingSwitch.get(userId) !== st) return;
+        this.pendingSwitch.delete(userId);
+        this.send(chatId, this.tr(
+          `⏱ جوابی نیامد؛ خودکار می‌رویم روی اکانت «${to}».`,
+          `⏱ No answer; switching automatically to "${to}".`,
+        )).catch(() => {});
+        resolve(true);
+      }, 60000);
+      st.timer.unref?.();
+      this.pendingSwitch.set(userId, st);
+      this.send(chatId, this.tr(
+        `♻️ سهمیهٔ اکانت «${from}» تمام شده؛ می‌رویم روی اکانت «${to}».\nاگر تا ۱ دقیقه دکمه‌ای نزنی، خودکار می‌روم و جلسه قطع نمی‌شود.`,
+        `♻️ Account "${from}" quota is used up; switching to "${to}".\nIf you don't tap within 1 minute I'll switch automatically and the session won't be cut.`,
+      ), {
+        reply_markup: { inline_keyboard: [
+          [btn(this.tr(`➡️ برو به اکانت «${to}»`, `➡️ Switch to "${to}"`), 'switch:go', 'success')],
+          [btn(this.tr('❌ انصراف', '❌ Cancel'), 'switch:no', 'danger')],
+        ] },
+      }).catch(() => {});
+    });
+  }
+
+  /** سوییچ واقعی روی اولین اکانت موجود از ترتیب داده‌شده */
+  async performFailover(chatId, model, order, silent = false) {
+    const cur = this.activeAccountName();
+    for (const name of order) {
       if (name === cur) continue;
       this.state.setMeta('activeAccount', name);
       this.applyActiveAccount();
       try {
         await this.chat.renewSession(model);
-        if (chatId) {
+        if (chatId && !silent) {
           await this.send(chatId, this.tr(
-            `♻️ سهمیهٔ اکانت «${cur}» تمام شده؛ می‌رویم روی اکانت «${name}».`,
-            `♻️ Account "${cur}" quota is used up; switching to "${name}".`,
+            `♻️ اکانت فعال شد: «${name}» — جلسه بدون وقفه ادامه پیدا کرد.`,
+            `♻️ Active account: "${name}" — the session continued without interruption.`,
           )).catch(() => {});
         }
         return name;
@@ -1746,7 +1956,7 @@ export class GuardianBot {
       // سهمیهٔ این اکانت تمام شده؟ خودکار روی اکانت بعدی برو و یک‌بار دیگر امتحان کن.
       if (this.isQuotaError(e) && attempt === 0) {
         await this.bot.deleteMessage(chatId, statusId).catch(() => {});
-        const switched = await this.tryFailover(chatId, this.settings.getModel());
+        const switched = await this.tryFailover(chatId, this.settings.getModel(), userId);
         if (switched) return this.runChat(chatId, userId, name, session, text, 1);
       }
       const hint = this.chatErrorHint(e);

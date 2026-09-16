@@ -58,6 +58,14 @@ export class AccountStore {
     return !!this.get(name);
   }
 
+  /** اعتبارنامهٔ اکانت پیش‌فرض سرور را دوباره تنظیم می‌کند (بعد از ریستور) */
+  setDefault(raw) {
+    const c = normalize(raw);
+    if (!c.authToken) return null;
+    this.defaults = c;
+    return c;
+  }
+
   /** افزودن/به‌روزرسانی اکانت از یک credentials خام */
   add(name, raw) {
     if (!NAME_RE.test(name)) throw new Error('نام اکانت نامعتبر است (حروف/عدد/.-_ تا ۴۰ کاراکتر)');
