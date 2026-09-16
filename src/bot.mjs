@@ -2332,7 +2332,9 @@ export class GuardianBot {
           if (tail) body += '\n\n' + tail.slice(-600);
         }
         if (lastToolLog.length) {
-          body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
+          // فقط ۲ دستور آخر و هرکدام کوتاه، تا پیام وضعیت بلند نشود
+          const recent = lastToolLog.slice(-2).map((t) => (t.length > 90 ? t.slice(0, 90) + '…' : t));
+          body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + recent.map((t) => '• ' + t).join('\n');
         }
         await this.editText(chatId, statusId, body.slice(0, 3900));
         if (this.goneMessages.has(statusId)) clearInterval(tick);
