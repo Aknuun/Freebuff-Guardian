@@ -817,8 +817,8 @@ export class GuardianBot {
   modelText() {
     const cur = this.settings.getModel();
     const base = this.tr(
-      `🤖 *مدل‌های رایگان*\nفعلی: \`${cur}\`\nکنار هر مدل قیمت (Freebucks/ساعت) و سهمیهٔ ساعتی امروز با آن مدل نوشته شده.`,
-      `🤖 *Free models*\nCurrent: \`${cur}\`\nEach model shows its price (Freebucks/hour) and today's hours left with it.`,
+      `🤖 *مدل‌های رایگان*\nفعلی: \`${cur}\`\nجلو هر مدل مصرفش (Freebucks/ساعت · سهمیهٔ ساعتی امروز) نوشته شده.\n🟩 فعلی · 🟦 قابل انتخاب · ⬜ غیرفعال (فعلاً در دسترس نیست)`,
+      `🤖 *Free models*\nCurrent: \`${cur}\`\nEach model shows its cost (Freebucks/hour · today's hours left).\n🟩 current · 🟦 selectable · ⬜ disabled (unavailable)`,
     );
     // هشدار سهمیه در پایین متن (نه بالا)
     const note = this.quotaExhaustedNote();
@@ -830,12 +830,17 @@ export class GuardianBot {
     const fb = this.chat.lastQuota?.freebucks;
     const remaining = fb?.daily?.remaining;
     const prices = fb?.prices ?? {};
+    const limits = this.chat.lastQuota?.rateLimitsByModel ?? {};
     const rows = freeModels().map((m) => {
       const p = prices[m];
-      let info = '';
-      if (p != null) {
-        const hours = remaining != null ? Math.floor(remaining / p) : null;
-        info = hours != null ? ` · ${p}FB · ${hours}h` : ` · ${p}FB`;
+      const cap = limits[m];
+      const capped = cap && cap.recentCount >= cap.limit;
+      const available = p != null && !capped;
+      const hours = (available && remaining != null) ? Math.floor(remaining / p) : null;
+      const info = p != null ? ` · ${p}FB${hours != null ? ` · ${hours}h` : ''}` : '';
+      if (!available) {
+        const label = `${m}${info}${this.tr(' — غیرفعال', ' — disabled')}`;
+        return [{ text: label, callback_data: `noop:${m}`, disabled: true }];
       }
       return [btn(`${m === cur ? '✅ ' : ''}${m}${info}`, `model:${m}`, m === cur ? 'success' : 'primary')];
     });
