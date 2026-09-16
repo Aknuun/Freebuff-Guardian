@@ -136,6 +136,8 @@ export class GuardianBot {
     });
     this.applyActiveAccount();
     this.busy = new Set(); // userId هایی که درخواست پردازشی در جریان دارند
+    this.menuMsg = new Map(); // chatId → id آخرین منوی دکمه‌دار (برای پاک‌سازی خودکار)
+    this.replyShown = new Set(); // chatId هایی که کیبورد ثابت برایشان فرستاده شده
     this.sessionWarned = false;
     this.lastProbe = 0;
 
@@ -179,6 +181,8 @@ export class GuardianBot {
   }
 
   showReplyKeyboard(chatId) {
+    if (this.replyShown.has(chatId)) return null; // فقط یک‌بار؛ بعداً منو کافی است
+    this.replyShown.add(chatId);
     return this.send(chatId, this.tr('⌨️ دکمه‌های ثابت پایین فعال شد.', '⌨️ Bottom keyboard enabled.'), this.replyKeyboardMarkup());
   }
 
@@ -354,13 +358,30 @@ export class GuardianBot {
     return rows;
   }
 
+  /** حذف آخرین منوی دکمه‌دار این چت تا چت شلوغ نشود */
+  async clearMenu(chatId) {
+    const id = this.menuMsg.get(chatId);
+    if (!id) return;
+    this.menuMsg.delete(chatId);
+    await this.bot.deleteMessage(chatId, id).catch(() => {});
+  }
+
   async send(chatId, text, extra = {}) {
+    const { keep, ...opts } = extra;
+    let sent;
     try {
-      return await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...extra });
+      sent = await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...opts });
     } catch {
       // Markdown شکسته نباشد
-      return this.bot.sendMessage(chatId, text.replace(/[*_`]/g, ''), extra);
+      sent = await this.bot.sendMessage(chatId, text.replace(/[*_`]/g, ''), opts);
     }
+    // پیام‌های منو (دکمهٔ درون‌خطی) جایگزین منوی قبلی می‌شوند
+    if (!keep && opts.reply_markup?.inline_keyboard) {
+      const prev = this.menuMsg.get(chatId);
+      if (prev && prev !== sent.message_id) this.bot.deleteMessage(chatId, prev).catch(() => {});
+      this.menuMsg.set(chatId, sent.message_id);
+    }
+    return sent;
   }
 
   async onMessage(msg) {
@@ -569,6 +590,10 @@ export class GuardianBot {
   async render(chatId, messageId, text, keyboard) {
     const markup = { reply_markup: { inline_keyboard: keyboard } };
     if (messageId) {
+      // پیام ویرایش‌شده همان منوی جاری است؛ اگر منوی دیگری باز است پاکش کن
+      const prev = this.menuMsg.get(chatId);
+      if (prev && prev !== messageId) this.bot.deleteMessage(chatId, prev).catch(() => {});
+      this.menuMsg.set(chatId, messageId);
       try {
         return await this.bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown', ...markup });
       } catch (e) {
@@ -1104,6 +1129,9 @@ export class GuardianBot {
           await answer(this.tr('لغو شد', 'Cancelled'));
           return home();
         }
+        // دکمه‌های تأیید دیگر لازم نیستند
+        if (this.menuMsg.get(chatId) === messageId) this.menuMsg.delete(chatId);
+        this.bot.deleteMessage(chatId, messageId).catch(() => {});
         this.applyActiveAccount();
         try {
           await this.chat.renewSession(this.settings.getModel());
@@ -1330,6 +1358,8 @@ export class GuardianBot {
   }
 
   async onChat(msg, chatId, userId, text) {
+    // تا شروع گفتگو منوی دکمه‌دار قبلی پاک شود (فقط متن چت می‌ماند)
+    await this.clearMenu(chatId);
     if (this.pendingSh.has(userId)) {
       this.pendingSh.delete(userId);
       return this.runShell(chatId, text);
@@ -1413,7 +1443,7 @@ export class GuardianBot {
     return new Promise((resolve) => {
       const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       this.pendingConfirm.set(id, resolve);
-      const kb = { reply_markup: { inline_keyboard: [[
+      const kb = { keep: true, reply_markup: { inline_keyboard: [[
         btn(this.tr('✅ اجرا کن', '✅ Run'), `toolok:${id}`, 'success'),
         btn(this.tr('❌ لغو', '❌ Cancel'), `toolno:${id}`, 'danger'),
       ]] } };
@@ -1574,12 +1604,14 @@ export class GuardianBot {
     return null;
   }
 
-  /** دکمهٔ تمدید فقط وقتی کمتر از مقدار هشدار (پیش‌فرض ۵ دقیقه) تا انقضا مانده */
-  renewKeyboardIfNear() {
-    if (!this.warnMin || this.warnMin <= 0) return {};
+  /** اگر کمتر از مقدار هشدار تا انقضا مانده، یک پیام جدا با دکمهٔ تمدید بفرست */
+  async maybeSendRenew(chatId) {
+    if (!this.warnMin || this.warnMin <= 0) return;
     const left = this.chat.remainingMs();
-    if (left == null || left > this.warnMin * 60000) return {};
-    return { reply_markup: { inline_keyboard: [[btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')]] } };
+    if (left == null || left > this.warnMin * 60000) return;
+    await this.send(chatId, this.tr(`⏳ ${humanMs(left)} تا پایان جلسه`, `⏳ ${humanMs(left, 'en')} until the session ends`), {
+      reply_markup: { inline_keyboard: [[btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')]] },
+    }).catch(() => {});
   }
 
   async runChat(chatId, userId, name, session, text, attempt = 0) {
@@ -1624,8 +1656,9 @@ export class GuardianBot {
       const out = answer.length > this.cfg.maxAnswerChars
         ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
         : answer || this.tr('(پاسخ خالی)', '(empty answer)');
-      // جواب در پیام جداگانه؛ دکمهٔ تمدید فقط اگر نزدیک انقضا باشد
-      await this.send(chatId, out, this.renewKeyboardIfNear());
+      // جواب چت باید دست‌نخورده بماند؛ دکمهٔ تمدید در پیام جدا می‌آید
+      await this.send(chatId, out);
+      await this.maybeSendRenew(chatId);
     } catch (e) {
       log.error('چت ناموفق:', e);
       // سهمیهٔ این اکانت تمام شده؟ خودکار روی اکانت بعدی برو و یک‌بار دیگر امتحان کن.
@@ -1638,8 +1671,9 @@ export class GuardianBot {
       await this.bot.deleteMessage(chatId, statusId).catch(() => {});
       const extra = this.isQuotaError(e)
         ? { reply_markup: { inline_keyboard: this.quotaErrorButtons() } }
-        : this.renewKeyboardIfNear();
+        : {};
       await this.send(chatId, `❌ ${hint.slice(0, 900)}`, extra).catch(() => {});
+      if (!this.isQuotaError(e)) await this.maybeSendRenew(chatId);
     } finally {
       this.busy.delete(userId);
     }
