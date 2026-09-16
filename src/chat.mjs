@@ -142,6 +142,7 @@ export class FreebuffChat {
     if (!res.ok || !data?.instanceId) {
       const err = new Error(this.admissionError(data, res.status));
       err.code = data?.status;
+      err.data = data;
       throw err;
     }
     this.lastSession = data;
@@ -184,12 +185,9 @@ export class FreebuffChat {
   async resolveSession(model) {
     let session = await this.activeSession();
     if (!session) {
-      try {
-        return await this.admitSession(model || this.agent);
-      } catch (e) {
-        log.warn('admission ناموفق؛ استفاده از instance محلی:', e.message);
-        return { instanceId: this.instances.safeInstanceId().id, model };
-      }
+      // بدون سشن معتبر، ساختن instance جعلی بی‌فایده است (منجر به ۴۲۸ می‌شود)؛
+      // پس خطای واقعی admission را بالا می‌فرستیم تا کاربر دلیلش را ببیند.
+      return await this.admitSession(model || this.agent);
     }
 
     const left = this.remainingMs();
@@ -318,7 +316,8 @@ export class FreebuffChat {
       // 428 = سشن بین راه تمام شده؛ یک سشن تازه بساز و یک‌بار دیگر تلاش کن.
       if (retry && res.status === 428) {
         log.warn('سشن منقضی شده بود (428)؛ تمدید و تلاش دوباره');
-        await this.renewSession(useModel).catch((e) => log.warn('تمدید پس از 428 ناموفق:', e.message));
+        // اگر تمدید شکست خورد (مثلاً سهمیه تمام است) همان خطا را نشان بده.
+        await this.renewSession(useModel);
         return this.complete({ model, messages, maxTokens, agent }, false);
       }
       const err = new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);

@@ -1004,8 +1004,7 @@ export class GuardianBot {
         try {
           await this.chat.renewSession(this.settings.getModel());
         } catch (e) {
-          await answer(e.message);
-          return home();
+          return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: this.homeKeyboard(u) } });
         }
         const session = this.state.getSession(userId, pend.name) || this.state.ensureSession(userId, pend.name);
         await answer(this.tr('سشن ساخته شد، در حال ارسال…', 'Session started, sending…'));
@@ -1153,7 +1152,17 @@ export class GuardianBot {
   /** ترجمهٔ خطاهای بک‌اند به پیام قابل‌فهم */
   chatErrorHint(e) {
     const status = e.status;
+    const code = e.code;
     const body = String(e.body || e.message || '').toLowerCase();
+    if (code === 'rate_limited' || code === 'spend_limited' || code === 'ip_capped') {
+      const ms = e.data?.retryAfterMs;
+      const when = ms ? humanMs(ms, this.lang()) : '';
+      const link = e.data?.upgrade?.url || 'https://freebuff.com/plans';
+      return this.tr(
+        `🚫 سهمیهٔ Freebucks امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.\nمی‌توانی پلن را ارتقا بدهی: ${link}`,
+        `🚫 Your daily Freebucks are used up${when ? `; resets in ${when}` : ''}.\nYou can upgrade: ${link}`,
+      );
+    }
     if (body.includes('waiting_room_required') || status === 428) {
       return this.tr('سشن فری‌باف تمام شده بود. دوباره پیام بفرست یا «➕ ایجاد سشن جدید» را بزن.', 'Your free session had ended. Send again or tap "➕ Start session".');
     }
