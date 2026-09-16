@@ -248,11 +248,47 @@ export class GuardianBot {
     ];
   }
 
+  /**
+   * خطوط سهمیهٔ یک اکانت. سهمیهٔ پاسخ سرور فقط وقتی جلسه فعال است معتبر است؛
+   * برای اکانت بدون جلسه، آخرین مقدار ثبت‌شده نشان داده می‌شود (نه عدد تازهٔ
+   * پیش‌فرض که گمراه‌کننده است).
+   */
+  quotaLinesForAccount(a, q) {
+    const en = this.lang() === 'en';
+    const active = q?.status === 'active';
+    const cached = active ? null : this.chat.cachedQuota?.(a.name);
+    const src = active ? q : cached;
+    const out = [];
+    if (active && q.remainingMs != null) {
+      out.push(this.tr(`   ⏳ جلسه فعال — ${humanMs(q.remainingMs)} مانده`, `   ⏳ Active session — ${humanMs(q.remainingMs, 'en')} left`));
+    }
+    const daily = src?.freebucks?.daily;
+    const w = src?.freeWindows;
+    const price = src?.freebucks?.prices?.[this.settings.getModel()];
+    if (!daily && !w) {
+      out.push(this.tr('   💵 سهمیه: — (بدون جلسه فعال)', '   💵 quota: — (no active session)'));
+      return out;
+    }
+    if (cached) out.push(this.tr('   ♻️ آخرین مقدار ثبت‌شده:', '   ♻️ last recorded:'));
+    if (daily) {
+      const left = Math.max(0, daily.remaining ?? 0);
+      const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
+      out.push(this.tr(`   💵 مانده: *${left}* از ${daily.limit} باک · استفاده‌شده: ${used}`, `   💵 Left: *${left}* of ${daily.limit} Bucks · used: ${used}`));
+      if (price) out.push(this.tr(`   ⏱ یعنی حدود ${Math.floor(left / price)} ساعت با ${this.settings.getModel()}`, `   ⏱ ~${Math.floor(left / price)}h with ${this.settings.getModel()}`));
+    } else {
+      out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
+    }
+    if (w) out.push(this.tr(
+      `   🎟 سقف تعداد جلسه — امروز ${w.dayUsed}/${w.dayLimit} · ۷روزه ${w.weekUsed}/${w.weekLimit} · ماهانه ${w.monthUsed}/${w.monthLimit}`,
+      `   🎟 Session-count cap — today ${w.dayUsed}/${w.dayLimit} · 7d ${w.weekUsed}/${w.weekLimit} · month ${w.monthUsed}/${w.monthLimit}`,
+    ));
+    return out;
+  }
+
   async accountText() {
     const list = this.accounts.list();
     const active = this.activeAccountName();
     const quotas = await Promise.all(list.map((a) => this.chat.accountQuota(a).catch(() => null)));
-    const model = this.settings.getModel();
     const out = [
       this.tr('👤 *اکانت‌های فری‌باف*', '👤 *Freebuff accounts*'),
       this.tr(`فعال: \`${active}\``, `Active: \`${active}\``),
@@ -260,27 +296,41 @@ export class GuardianBot {
     ];
     list.forEach((a, i) => {
       const q = quotas[i];
-      const daily = q?.freebucks?.daily;
-      const w = q?.freeWindows;
-      const price = q?.freebucks?.prices?.[model];
       const actor = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
       out.push(`${a.name === active ? '✅' : '•'} *${actor}*${q && q.status !== 'active' ? this.tr(' — بدون جلسه', ' — no session') : ''}`);
-      if (daily) {
-        const left = Math.max(0, daily.remaining ?? 0);
-        const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
-        out.push(this.tr(`   💵 مانده: *${left}* از ${daily.limit} باک · استفاده‌شده: ${used}`, `   💵 Left: *${left}* of ${daily.limit} Bucks · used: ${used}`));
-        if (price) out.push(this.tr(`   ⏱ یعنی حدود ${Math.floor(left / price)} ساعت با ${model}`, `   ⏱ ~${Math.floor(left / price)}h with ${model}`));
-      } else {
-        out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
-      }
-      if (w) out.push(this.tr(
-        `   🎟 سقف تعداد جلسه — امروز ${w.dayUsed}/${w.dayLimit} · ۷روزه ${w.weekUsed}/${w.weekLimit} · ماهانه ${w.monthUsed}/${w.monthLimit}`,
-        `   🎟 Session-count cap — today ${w.dayUsed}/${w.dayLimit} · 7d ${w.weekUsed}/${w.weekLimit} · month ${w.monthUsed}/${w.monthLimit}`,
-      ));
+      out.push(...this.quotaLinesForAccount(a, q));
       out.push('');
     });
-    out.push(this.tr('برای تعویض، روی اکانت بزن.', 'Tap an account to switch.'));
+    out.push(this.tr('برای دیدن جزئیات، روی اکانت بزن.', 'Tap an account to view its details.'));
     return out.join('\n');
+  }
+
+  /** متن جزئیات فقط یک اکانت (بدون نمایش بقیه) */
+  async accountDetailText(name) {
+    const a = this.accounts.get(name);
+    if (!a) return this.tr('❌ اکانت پیدا نشد.', '❌ Account not found.');
+    const q = await this.chat.accountQuota(a).catch(() => null);
+    const active = this.activeAccountName() === name;
+    const out = [
+      this.tr(`👤 *اکانت «${a.label || a.name}»*`, `👤 *Account "${a.label || a.name}"*`),
+      this.tr(`نام: \`${a.name}\``, `Name: \`${a.name}\``),
+    ];
+    if (a.email) out.push(this.tr(`ایمیل: ${a.email}`, `Email: ${a.email}`));
+    out.push(this.tr(`وضعیت: ${active ? '✅ فعال' : '⚪ غیرفعال'}`, `Status: ${active ? '✅ active' : '⚪ inactive'}`));
+    out.push(...this.quotaLinesForAccount(a, q));
+    return out.join('\n');
+  }
+
+  accountDetailKeyboard(name) {
+    const active = this.activeAccountName() === name;
+    const rows = [];
+    if (!active) rows.push([btn(this.tr('✅ فعال کردن این اکانت', '✅ Activate this account'), `accu:${name}`, 'success')]);
+    rows.push([
+      btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
+      btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
+    ]);
+    rows.push([btn(this.tr('↩️ اکانت‌ها', '↩️ Accounts'), 'menu:account'), btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')]);
+    return rows;
   }
 
   /** انتخاب نام نهایی اکانت (اگر نام دلخواه داده نشده باشد از اطلاعات کاربر) */
@@ -388,7 +438,7 @@ export class GuardianBot {
     const active = this.activeAccountName();
     const rows = this.accounts.list().map((a) => {
       const label = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
-      return [btn(`${a.name === active ? '✅ ' : ''}${label}`, `acc:${a.name}`, a.name === active ? 'success' : 'primary')];
+      return [btn(`${a.name === active ? '✅ ' : ''}${label}`, `accv:${a.name}`, a.name === active ? 'success' : 'primary')];
     });
     rows.push([btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success')]);
     rows.push([
@@ -818,7 +868,8 @@ export class GuardianBot {
         '• «🌐 ورود با وب» — لینک لاگین می‌دهد (با دکمهٔ کپی آدرس)؛ در سایت فری‌باف لاگین کن.',
         '• «✏️ با نام دلخواه» — قبلش اسم بده.',
         '',
-        'هر اکانت جلسه و باک مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
+        'هر اکانت جلسه و باک مستقل دارد؛ با زدن روی اکانت جزئیاتش را می‌بینی و با دکمهٔ «✅ فعال کردن این اکانت» فعال می‌شود.',
+        '💾 «بکاپ اکانت‌ها» فایل پشتیبان می‌سازد و «♻️ ریستور از فایل» آن را برمی‌گرداند.',
       ].join('\n'),
       chat: [
         '💬 *چت و جلسه‌ها*',
@@ -887,7 +938,8 @@ export class GuardianBot {
         '• "🌐 Web login" — gives a login link (with a copy-link button); sign in on the Freebuff site.',
         '• "✏️ Custom name" — set a name first.',
         '',
-        'Each account has its own session and Bucks; tap it to activate.',
+        'Each account has its own session and Bucks; tap it to view its details and activate it with "✅ Activate this account".',
+        '💾 "Backup accounts" creates a backup file and "♻️ Restore from file" brings it back.',
       ].join('\n'),
       chat: [
         '💬 *Chat & sessions*',
@@ -1415,10 +1467,26 @@ export class GuardianBot {
           await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
           return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
         }
+        return this.render(chatId, messageId, await this.accountDetailText(value), this.accountDetailKeyboard(value));
+      }
+
+      case 'accv': {
+        if (!this.accounts.has(value)) {
+          await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
+          return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+        }
+        return this.render(chatId, messageId, await this.accountDetailText(value), this.accountDetailKeyboard(value));
+      }
+
+      case 'accu': {
+        if (!this.accounts.has(value)) {
+          await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
+          return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+        }
         this.state.setMeta('activeAccount', value);
         this.applyActiveAccount();
         await answer(this.tr(`اکانت فعال: ${value}`, `Active account: ${value}`));
-        return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+        return this.render(chatId, messageId, await this.accountDetailText(value), this.accountDetailKeyboard(value));
       }
 
       case 'accnamed':

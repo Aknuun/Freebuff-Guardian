@@ -77,19 +77,6 @@ CLI. The bot reverse‑engineers that behaviour and reproduces it:
    feeding the results back to the model.
 5. It keeps the session's `instanceId`, so it never kicks an interactive CLI session (HTTP 409).
 
-## ⚠️ Prerequisite: install Freebuff on the server first
-
-The bot is only a front‑end; it cannot work without Freebuff being installed and logged in on the
-same server:
-
-```bash
-npm i -g freebuff
-freebuff          # first run asks you to log in
-```
-
-After logging in, `~/.config/manicode/credentials.json` is created. If you want to chat with a
-paid plan, you can upgrade at **https://freebuff.com/plans**.
-
 ## 🚀 Install
 
 ### One‑line install (recommended)

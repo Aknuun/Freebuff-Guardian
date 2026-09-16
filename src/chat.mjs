@@ -50,6 +50,7 @@ export class FreebuffChat {
     this.lastSession = null; // آخرین جلسه شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
     this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی جلسه بسته است هم نمایش داده می‌شود)
     this.accountName = null; // نام اکانت فعال (چند-اکانتی)
+    this.quotaByAccount = {}; // name → آخرین سهمیه‌ی معتبر (فقط وقتی جلسه فعال است)
   }
 
   /** تغییر اکانت فعال؛ چون جلسه/سهمیه per-account است، کش پاک می‌شود */
@@ -69,7 +70,13 @@ export class FreebuffChat {
   cacheQuota(session) {
     if (session?.freeWindows || session?.freebucks) {
       this.lastQuota = { freeWindows: session.freeWindows, freebucks: session.freebucks, at: Date.now() };
+      if (this.accountName) this.quotaByAccount[this.accountName] = this.lastQuota;
     }
+  }
+
+  /** آخرین سهمیه‌ی معتبر ثبت‌شده برای یک اکانت (یا null) */
+  cachedQuota(name) {
+    return this.quotaByAccount[name] ?? null;
   }
 
   headers(extra = {}) {
@@ -215,7 +222,13 @@ export class FreebuffChat {
         headers: { Authorization: `Bearer ${account.authToken}` },
       });
       if (!res.ok) return null;
-      return await res.json();
+      const data = await res.json();
+      // فقط سهمیه‌ی جلسه‌ی فعال معتبر است؛ برای اکانت بدون جلسه، پاسخ سرور
+      // مقدار «روزانه‌ی پیش‌فرض» است و نباید جای مقدار واقعی جا بزند.
+      if (data?.status === 'active' && account.name) {
+        this.quotaByAccount[account.name] = { freeWindows: data.freeWindows, freebucks: data.freebucks, at: Date.now() };
+      }
+      return data;
     } catch {
       return null;
     }

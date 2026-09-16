@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # install.sh — interactive installer for Freebuff Guardian
-# Asks for the BotFather token and your numeric user id, checks the Freebuff
-# prerequisite, then installs/starts the bot.
+# Asks for the BotFather token and your numeric user id, then installs/starts
+# the bot. A local Freebuff CLI login is optional: accounts can be added from
+# inside the bot via Web login.
 set -euo pipefail
 cd "$(dirname "$0")"
 DIR="$(pwd)"
@@ -21,24 +22,21 @@ command -v node >/dev/null 2>&1 || { err "Node.js is not installed. Install it: 
 command -v npm  >/dev/null 2>&1 || { err "npm is not installed."; exit 1; }
 bold "Node: $(node -v) — npm: $(npm -v)"
 
-# ── 2) Freebuff prerequisite (must be installed + logged in) ────
+# ── 2) Freebuff (optional — accounts can also be added via Web login) ──
 echo
-bold "Prerequisite: Freebuff"
-echo "This bot cannot work without Freebuff. First install and log in to"
-echo "Freebuff on THIS server:"
-echo "    npm i -g freebuff"
-echo "    freebuff          # then log in"
+bold "Freebuff (optional)"
+echo "You can add accounts later from inside the bot:"
+echo "    Accounts → ➕ Add account → 🌐 Web login"
+echo "Optionally, log in to the Freebuff CLI on this server instead:"
+echo "    npm i -g freebuff && freebuff"
 echo "Website:  https://freebuff.com"
 echo
 
 FB_CRED="$HOME/.config/manicode/credentials.json"
-if [[ ! -f "$FB_CRED" ]]; then
-  warn "Freebuff credentials not found: $FB_CRED"
-  warn "If you have not installed/logged in yet, the bot will not be able to chat."
-  read -rp "Continue anyway? [y/N] " ans
-  [[ "${ans,,}" == "y" ]] || { echo "Aborted. Install Freebuff first: https://freebuff.com"; exit 1; }
-else
+if [[ -f "$FB_CRED" ]]; then
   ok "Freebuff credentials found."
+else
+  warn "No Freebuff credentials found — add an account from the bot after install."
 fi
 
 # ── 3) Telegram token + user id ─────────────────────────────────
