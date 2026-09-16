@@ -20,6 +20,7 @@ function normalize(raw) {
     userId: base.id ?? base.userId ?? null,
     email: base.email ?? null,
     label: base.name ?? null,
+    proxy: base.proxy ?? null,
   };
 }
 
@@ -73,9 +74,20 @@ export class AccountStore {
     const c = normalize(raw);
     if (!c.authToken) throw new Error('authToken در این فایل پیدا نشد');
     const file = path.join(this.dir, `${name}.json`);
-    const data = { name, label: c.label || name, authToken: c.authToken, fingerprintId: c.fingerprintId, userId: c.userId, email: c.email };
+    const data = { name, label: c.label || name, authToken: c.authToken, fingerprintId: c.fingerprintId, userId: c.userId, email: c.email, proxy: c.proxy ?? null };
     fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
     log.info(`اکانت اضافه شد: ${name}`);
+    return this.get(name);
+  }
+
+  /** تعیین/حذف پروکسی یک اکانت (برای اکانت default از state استفاده می‌شود) */
+  setProxy(name, proxy) {
+    if (name === 'default') throw new Error('پروکسی اکانت default از FREEBUFF_PROXY یا دکمهٔ پروکسی تنظیم می‌شود');
+    const file = path.join(this.dir, `${name}.json`);
+    if (!fs.existsSync(file)) throw new Error('اکانت پیدا نشد');
+    const a = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (proxy) a.proxy = proxy; else delete a.proxy;
+    fs.writeFileSync(file, JSON.stringify(a, null, 2), { mode: 0o600 });
     return this.get(name);
   }
 

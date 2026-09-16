@@ -60,6 +60,24 @@ function isDangerousCommand(cmd) {
   return DANGEROUS_CMD.some((re) => re.test(cmd));
 }
 
+// قیمت تقریبی مدل‌ها (باک/ساعت) برای تخمین‌ها وقتی سهمیه‌ای کش نشده است
+const FREE_PRICES = {
+  'z-ai/glm-5.3-flash': 5,
+  'z-ai/glm-5.2': 5,
+  'z-ai/glm-5.1': 5,
+  'z-ai/glm-5': 5,
+  'crof/kimi-k3-eco': 5,
+  'minimax/minimax-m3': 10,
+  'mimo/mimo-v2.5': 10,
+  'upstage/solar-pro4': 10,
+  'deepseek/deepseek-v4-flash': 15,
+  'deepseek/deepseek-v4-pro': 15,
+  'openai/gpt-5.6-luna': 20,
+  'openai/gpt-5.6-luna-es': 20,
+  'anthropic/claude-fable-5': 20,
+  'google/gemini-3.8-flash': 50,
+};
+
 /** ساخت دکمه با رنگ اختیاری (style: primary=آبی، success=سبز، danger=قرمز) */
 function btn(text, callback_data, style) {
   const b = { text, callback_data };
@@ -121,6 +139,7 @@ export class GuardianBot {
         userId: cfg.fbUser?.id ?? null,
         email: cfg.fbUser?.email ?? null,
         label: cfg.fbDefaultLabel,
+        proxy: cfg.fbProxy ?? null,
       },
     });
     this.backups = new AccountBackup({
@@ -135,6 +154,7 @@ export class GuardianBot {
     this.pendingConfirm = new Map(); // id → resolve برای تأیید دستور خطرناک
     this.pendingRestore = new Set(); // userId → منتظر فایل بکاپ برای ریستور
     this.pendingSwitch = new Map(); // userId → سوییچ اکانت در انتظار تأیید/انصراف
+    this.pendingProxy = new Set(); // userId → منتظر آدرس پروکسی
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
@@ -221,11 +241,38 @@ export class GuardianBot {
 
   activeAccount() { return this.accounts.get(this.activeAccountName()) || this.accounts.get('default'); }
 
+  /** پروکسی مؤثر اکانت default (از state یا env) */
+  defaultProxy() {
+    return this.state.getMeta('defaultProxy') ?? this.cfg.fbProxy ?? null;
+  }
+
+  /** اکانت با پروکسی مؤثر (default از state/env می‌گیرد) */
+  effectiveAccount(acc) {
+    if (!acc) return acc;
+    const proxy = acc.name === 'default' ? this.defaultProxy() : (acc.proxy ?? null);
+    return proxy === (acc.proxy ?? null) ? acc : { ...acc, proxy };
+  }
+
   /** اکانت فعال را روی موتور چت اعمال می‌کند */
   applyActiveAccount(force = false) {
-    const acc = this.activeAccount();
+    const acc = this.effectiveAccount(this.activeAccount());
     if (acc) this.chat.useAccount(acc, force);
     return acc;
+  }
+
+  /** تعیین/حذف پروکسی اکانت فعال؛ آدرس مؤثر را برمی‌گرداند */
+  setActiveProxy(value) {
+    const a = this.activeAccount();
+    if (!a) throw new Error(this.tr('اول یک اکانت وصل کن.', 'Connect an account first.'));
+    const v = String(value || '').trim();
+    const proxy = v && v !== 'off' && v !== 'none' ? v : null;
+    if (proxy && !/^[a-z][a-z0-9+.-]*:\/\//i.test(proxy)) {
+      throw new Error(this.tr('آدرس پروکسی باید با http:// یا https:// شروع شود', 'Proxy URL must start with http:// or https://'));
+    }
+    if (a.name === 'default') this.state.setMeta('defaultProxy', proxy);
+    else this.accounts.setProxy(a.name, proxy);
+    this.applyActiveAccount(true);
+    return proxy;
   }
 
   /** آیا هیچ اکانتی (پیش‌فرض یا فایلی) وصل نیست؟ */
@@ -274,7 +321,17 @@ export class GuardianBot {
       const left = Math.max(0, daily.remaining ?? 0);
       const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
       out.push(this.tr(`   💵 مانده: *${left}* از ${daily.limit} باک · استفاده‌شده: ${used}`, `   💵 Left: *${left}* of ${daily.limit} Bucks · used: ${used}`));
-      if (price) out.push(this.tr(`   ⏱ یعنی حدود ${Math.floor(left / price)} ساعت با ${this.settings.getModel()}`, `   ⏱ ~${Math.floor(left / price)}h with ${this.settings.getModel()}`));
+      if (price) {
+        const remainSessions = w
+          ? Math.max(0, Math.min(w.dayLimit - w.dayUsed, w.weekLimit - w.weekUsed, w.monthLimit - w.monthUsed))
+          : null;
+        const bucksHours = Math.floor(left / price);
+        const hours = remainSessions == null ? bucksHours : Math.min(bucksHours, remainSessions);
+        const capNote = remainSessions != null && remainSessions <= bucksHours
+          ? this.tr(` (محدود به ${remainSessions} جلسهٔ باقی‌مانده)`, ` (capped by ${remainSessions} sessions left)`)
+          : '';
+        out.push(this.tr(`   ⏱ حدود ${hours} ساعت با ${this.settings.getModel()}${capNote}`, `   ⏱ ~${hours}h with ${this.settings.getModel()}${capNote}`));
+      }
     } else {
       out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
     }
@@ -285,9 +342,35 @@ export class GuardianBot {
     return out;
   }
 
+  /** تخمین تعداد اکانت لازم برای پوشش کامل بر اساس مدل و سقف‌ها */
+  coverageAccounts(q) {
+    const model = this.settings.getModel();
+    const lq = this.chat.lastQuota;
+    const w = q?.freeWindows ?? lq?.freeWindows;
+    const price = q?.freebucks?.prices?.[model] ?? lq?.freebucks?.prices?.[model] ?? FREE_PRICES[model] ?? null;
+    const dailyBucks = q?.freebucks?.daily?.limit ?? lq?.freebucks?.daily?.limit ?? 70;
+    const dayLimit = w?.dayLimit ?? 5;
+    const weekLimit = w?.weekLimit ?? 14;
+    const monthLimit = w?.monthLimit ?? 40;
+    const per = (cap, days) => (price ? Math.min(cap, Math.floor((dailyBucks * days) / price)) : cap);
+    const dayH = per(dayLimit, 1);
+    const weekH = per(weekLimit, 7);
+    const monthH = per(monthLimit, 30);
+    const need = (total, h) => (h > 0 ? Math.ceil(total / h) : null);
+    return { day: need(24, dayH), week: need(168, weekH), month: need(720, monthH), dayH, weekH, monthH, model };
+  }
+
+  freeCoverageNote() {
+    const c = this.coverageAccounts();
+    return this.tr(
+      `🧮 *پوشش کامل ۲۴/۷ با ${c.model}* (با سقف هر اکانت: روز ${c.dayH}h · هفته ${c.weekH}h · ماه ${c.monthH}h)\n• یک شبانه‌روز کامل: *${c.day}* اکانت\n• یک هفته کامل: *${c.week}* اکانت\n• یک ماه کامل: *${c.month}* اکانت`,
+      `🧮 *Full 24/7 coverage with ${c.model}* (per-account caps: day ${c.dayH}h · week ${c.weekH}h · month ${c.monthH}h)\n• One full day: *${c.day}* accounts\n• One full week: *${c.week}* accounts\n• One full month: *${c.month}* accounts`,
+    );
+  }
+
   /** متن صفحهٔ اکانت‌ها: فقط اطلاعات اکانت فعال (نه بقیه) */
   async accountText() {
-    const a = this.activeAccount();
+    const a = this.effectiveAccount(this.activeAccount());
     if (!a) return this.noAccountText();
     const q = await this.chat.accountQuota(a).catch(() => null);
     const actor = a.label || a.name;
@@ -296,8 +379,11 @@ export class GuardianBot {
       this.tr(`اکانت فعال: *${actor}* (\`${a.name}\`)`, `Active account: *${actor}* (\`${a.name}\`)`),
     ];
     if (a.email) out.push(this.tr(`ایمیل: ${a.email}`, `Email: ${a.email}`));
+    out.push(this.tr(`🌐 پروکسی: ${a.proxy ? `\`${a.proxy}\`` : '—'}`, `🌐 Proxy: ${a.proxy ? `\`${a.proxy}\`` : '—'}`));
     out.push(...this.quotaLinesForAccount(a, q));
     out.push('');
+    const c = this.coverageAccounts(q);
+    if (c.month) out.push(this.tr(`🧮 برای ۲۴/۷ِ یک ماه کامل حدود *${c.month}* اکانت لازم است (جزئیات در ❓ راهنما).`, `🧮 A full month of 24/7 needs about *${c.month}* accounts (see ❓ Help).`));
     out.push(this.tr('برای دیدن/تعویض اکانت روی دکمه‌اش بزن.', 'Tap an account button to view/switch.'));
     return out.join('\n');
   }
@@ -414,6 +500,7 @@ export class GuardianBot {
       btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success'),
       btn(this.tr('🗑 حذف اکانت', '🗑 Delete account'), 'accdel', 'danger'),
     ]);
+    rows.push([btn(this.tr('🌐 پروکسی اکانت', '🌐 Account proxy'), 'acc:proxy', 'primary')]);
     rows.push([
       btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
       btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
@@ -616,6 +703,24 @@ export class GuardianBot {
         return this.send(chatId, this.tr('استفاده: /account | /account use <n> | /account add <n> | /account del <n>', 'Usage: /account | /account use <n> | /account add <n> | /account del <n>'));
       }
 
+      case '/proxy': {
+        const a = this.effectiveAccount(this.activeAccount());
+        if (!a) return this.send(chatId, this.noAccountText(), { reply_markup: { inline_keyboard: this.noAccountKeyboard() } });
+        if (!arg) {
+          return this.send(chatId, this.tr(
+            `🌐 پروکسی اکانت «${a.name}»: ${a.proxy ? `\`${a.proxy}\`` : '— (بدون پروکسی)'}\nتنظیم: \`/proxy http://user:pass@host:port\`\nحذف: \`/proxy off\``,
+            `🌐 Proxy for "${a.name}": ${a.proxy ? `\`${a.proxy}\`` : '— (none)'}\nSet: \`/proxy http://user:pass@host:port\`\nRemove: \`/proxy off\``,
+          ), { reply_markup: { inline_keyboard: [[btn(this.tr('🌐 تنظیم پروکسی', '🌐 Set proxy'), 'acc:proxy', 'primary')]] } });
+        }
+        try {
+          const cur = this.setActiveProxy(arg);
+          return this.send(chatId, this.tr(
+            cur ? `✅ پروکسی اکانت «${a.name}» تنظیم شد: \`${cur}\`` : `✅ پروکسی اکانت «${a.name}» حذف شد.`,
+            cur ? `✅ Proxy for "${a.name}" set: \`${cur}\`` : `✅ Proxy for "${a.name}" removed.`,
+          ));
+        } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
+      }
+
       case '/models': {
         await this.chat.activeSession().catch(() => {});
         const note = this.quotaExhaustedNote();
@@ -808,10 +913,10 @@ export class GuardianBot {
         'فری‌باف هر روز یک بودجهٔ «باک» می‌دهد که بین همهٔ مدل‌ها مشترک است.',
         '• هر جلسه، هنگام شروع، معادل قیمت ساعتی مدل از باک کم می‌کند (یک‌بار، نه هر پیام).',
         '• قیمت‌ها (باک برای هر ساعت): GLM=۵ · Kimi=۵ · MiMo=۱۰ · Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini=۵۰',
-        '• اگر همهٔ بودجه روی یک مدل خرج شود: GLM ≈ ۱۴ ساعت · DeepSeek ≈ ۴ ساعت · Luna ≈ ۳ ساعت.',
+        '• «🎟 سقف تعداد جلسه» جداست (امروز ۵ · ۷روزه ۱۴ · ماهانه ۴۰) و هر جلسه فقط ۱ ساعت است.',
+        '• پس برای GLM کم‌هزینه، سقف جلسه زودتر تمام می‌شود تا باک: هر اکانت روزی ~۵ ساعت (نه ۱۴).',
         '• بودجه هر روز نیمه‌شب Pacific پر می‌شود و منتقل نمی‌شود.',
-        '• بعضی مدل‌ها «پریمیوم»‌اند و سقف روزانهٔ جدا (۵ بار) هم دارند.',
-        '• «🎟 سقف تعداد جلسه» یک شمارندهٔ جداگانه است (امروز/۷روزه/ماهانه)؛ محدودیت اصلی همان باک است.',
+        '• بعضی مدل‌ها «پریمیوم»‌اند و سقف روزانهٔ جدا هم دارند.',
         '',
         '📊 استفاده‌شده و مانده در «وضعیت» و «👤 اکانت‌ها» نوشته می‌شود.',
       ].join('\n'),
@@ -844,6 +949,7 @@ export class GuardianBot {
         'هر اکانت جلسه و باک مستقل دارد؛ روی دکمهٔ هر اکانت بزن تا فعال شود و اطلاعاتش همان‌جا نشان داده شود.',
         '• «▶️ شروع جلسه» برای اکانت فعال جلسه می‌سازد.',
         '• «🗑 حذف اکانت» اکانت فعال را حذف می‌کند (default حذف نمی‌شود).',
+        '• «🌐 پروکسی اکانت» برای تغییر IP هر اکانت (رفع محدودیت ip_capped).',
         '• «💾 بکاپ اکانت‌ها» فایل پشتیبان می‌سازد و «♻️ ریستور از فایل» آن را برمی‌گرداند.',
       ].join('\n'),
       chat: [
@@ -880,10 +986,10 @@ export class GuardianBot {
         'Freebuff gives a daily Bucks budget shared across all models.',
         '• Starting a session charges the model\'s hourly price once (not per message).',
         '• Prices (Bucks/hour): GLM=5 · Kimi=5 · MiMo=10 · Solar=10 · DeepSeek V4 Flash=15 · Luna=20 · Gemini=50',
-        '• Spending it all on one model: GLM ≈ 14h · DeepSeek ≈ 4h · Luna ≈ 3h.',
+        '• "🎟 Session-count cap" is separate (today 5 · 7d 14 · month 40) and each session is only 1 hour.',
+        '• So for cheap GLM the session cap runs out before Bucks: each account gets ~5h/day (not 14).',
         '• The budget refills at midnight Pacific and does not carry over.',
-        '• Some models are "premium" and also have a separate daily cap (5).',
-        '• "🎟 Session-count cap" is a separate counter (today/7d/month); the main limit is Bucks.',
+        '• Some models are "premium" and also have a separate daily cap.',
         '',
         '📊 Used/left is shown in *Status* and *Accounts*.',
       ].join('\n'),
@@ -916,6 +1022,7 @@ export class GuardianBot {
         'Each account has its own session and Bucks; tap an account button to activate it and see its details right here.',
         '• "▶️ Start session" starts a session for the active account.',
         '• "🗑 Delete account" deletes the active account (default cannot be deleted).',
+        '• "🌐 Account proxy" gives each account its own IP (fixes ip_capped).',
         '• "💾 Backup accounts" creates a backup file and "♻️ Restore from file" brings it back.',
       ].join('\n'),
       chat: [
@@ -946,7 +1053,9 @@ export class GuardianBot {
       ].join('\n'),
     };
     const sections = this.lang() === 'en' ? en : fa;
-    return sections[section] || this.helpText();
+    const base = sections[section] || this.helpText();
+    if (section === 'account') return `${base}\n\n${this.freeCoverageNote()}`;
+    return base;
   }
 
   settingsText() {
@@ -1440,6 +1549,17 @@ export class GuardianBot {
           await answer(this.tr('لغو شد', 'Cancelled'));
           return home();
         }
+        if (value === 'proxy') {
+          const a = this.effectiveAccount(this.activeAccount());
+          if (!a) { await answer(this.tr('اکانتی نیست', 'No account')); return home(); }
+          this.pendingProxy.add(userId);
+          return this.render(chatId, messageId, this.tr(
+            `🌐 *پروکسی اکانت «${a.name}»*\nپروکسی فعلی: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nآدرس پروکسی را بفرست (مثلاً \`http://user:pass@host:port\`).\nبرای حذف پروکسی بنویس \`off\`.`,
+            `🌐 *Proxy for account "${a.name}"*\nCurrent: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nSend the proxy URL (e.g. \`http://user:pass@host:port\`).\nSend \`off\` to remove it.`,
+          ), [
+            [btn(this.tr('❌ انصراف', '❌ Cancel'), 'menu:account')],
+          ]);
+        }
         if (!this.accounts.has(value)) {
           await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
           return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
@@ -1617,6 +1737,20 @@ export class GuardianBot {
     return this.send(chatId, this.tr(`افزودن اکانت «${name}» — روش را انتخاب کن:`, `Add account "${name}" — choose a method:`), { reply_markup: { inline_keyboard: this.accountMethodKeyboard(name) } });
   }
 
+  /** دریافت آدرس پروکسی برای اکانت فعال */
+  async handleProxyInput(chatId, userId, text) {
+    this.pendingProxy.delete(userId);
+    try {
+      const cur = this.setActiveProxy(text);
+      return this.send(chatId, this.tr(
+        cur ? `✅ پروکسی تنظیم شد: \`${cur}\`` : '✅ پروکسی حذف شد.',
+        cur ? `✅ Proxy set: \`${cur}\`` : '✅ Proxy removed.',
+      ), { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+    } catch (e) {
+      return this.send(chatId, `❌ ${e.message}`, { reply_markup: { inline_keyboard: this.accountKeyboard() } });
+    }
+  }
+
   // ---------- چت ----------
   /** ترجمهٔ خطاهای بک‌اند به پیام قابل‌فهم */
   chatErrorHint(e) {
@@ -1676,10 +1810,14 @@ export class GuardianBot {
       return this.runShell(chatId, text);
     }
     if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
+    if (this.pendingProxy.has(userId)) return this.handleProxyInput(chatId, userId, text);
     if (this.busy.has(userId)) {
       return this.send(chatId, this.tr('⏳ هنوز پاسخ قبلی در جریان است…', '⏳ The previous answer is still in progress…'));
     }
     this.applyActiveAccount();
+    if (this.hasNoAccount()) {
+      return this.send(chatId, this.noAccountText(), { reply_markup: { inline_keyboard: this.noAccountKeyboard() } });
+    }
     if (!this.activeAccount()?.authToken) {
       return this.send(chatId, this.tr('❌ credentials فری‌باف پیدا نشد. اول در سرور freebuff login کن.', '❌ Freebuff credentials not found. Run freebuff login first.'));
     }

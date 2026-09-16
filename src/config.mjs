@@ -89,6 +89,8 @@ export function loadConfig() {
     fbFingerprintId: fbUser?.fingerprintId ?? `freebuff-guardian-${Date.now().toString(36)}`,
     fbModel,
     fbAgent,
+    // پروکسی پیش‌فرض (برای اکانت default)؛ هر اکانت می‌تواند پروکسی خودش را داشته باشد
+    fbProxy: process.env.FREEBUFF_PROXY || null,
     // پروفایل‌های اکانت (هر فایل = یک اکانت؛ اکانت پیش‌فرض همان credentials سرور است)
     accountsDir: process.env.FREEBUFF_ACCOUNTS_DIR || path.join(process.cwd(), 'accounts'),
     // مسیر credentials خود CLI برای بکاپ/ریستور اکانت default

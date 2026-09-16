@@ -19,6 +19,7 @@
 
 import { makeLogger } from './logger.mjs';
 import { freeAgentForModel } from './config.mjs';
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
 
 const log = makeLogger('chat');
 
@@ -51,18 +52,54 @@ export class FreebuffChat {
     this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی جلسه بسته است هم نمایش داده می‌شود)
     this.accountName = null; // نام اکانت فعال (چند-اکانتی)
     this.quotaByAccount = {}; // name → آخرین سهمیه‌ی معتبر (فقط وقتی جلسه فعال است)
+    this.proxy = null; // پروکسی اکانت فعال (برای تغییر IP)
+    this.dispatchers = new Map(); // proxy URL → ProxyAgent
+  }
+
+  /** dispatcher پروکسی برای یک آدرس (یا undefined اگر پروکسی نباشد/نامعتبر باشد) */
+  dispatcherFor(proxy) {
+    if (!proxy) return undefined;
+    if (this.dispatchers.has(proxy)) return this.dispatchers.get(proxy);
+    let agent;
+    try {
+      agent = new ProxyAgent(proxy);
+    } catch (e) {
+      log.warn(`پروکسی نامعتبر «${proxy}» نادیده گرفته شد: ${e.message}`);
+      this.dispatchers.set(proxy, undefined);
+      return undefined;
+    }
+    this.dispatchers.set(proxy, agent);
+    return agent;
+  }
+
+  /** درخواست HTTP با پروکسی اختیاری (per-account برای تغییر IP) */
+  async req(url, opts = {}, proxy = this.proxy) {
+    const dispatcher = this.dispatcherFor(proxy);
+    try {
+      return await undiciFetch(url, dispatcher ? { ...opts, dispatcher } : opts);
+    } catch (e) {
+      if (proxy) {
+        const err = new Error(`اتصال از طریق پروکسی «${proxy}» ناموفق بود: ${e.message}`);
+        err.cause = e;
+        throw err;
+      }
+      throw e;
+    }
   }
 
   /** تغییر اکانت فعال؛ چون جلسه/سهمیه per-account است، کش پاک می‌شود */
   useAccount(account, force = false) {
     if (!account?.authToken) return false;
-    if (!force && this.accountName === account.name) return false;
+    const proxy = account.proxy ?? null;
+    const same = this.accountName === account.name && this.authToken === account.authToken && this.proxy === proxy;
+    if (!force && same) return false;
     this.accountName = account.name;
     this.authToken = account.authToken;
     this.fingerprintId = account.fingerprintId ?? null;
+    this.proxy = proxy;
     this.lastSession = null;
     this.lastQuota = null;
-    log.info('اکانت فعال تغییر کرد:', account.name);
+    log.info('اکانت فعال تغییر کرد:', account.name, proxy ? `proxy=${proxy}` : '');
     return true;
   }
 
@@ -90,7 +127,7 @@ export class FreebuffChat {
 
   /** جلسه فعال فری‌باف (instanceId معتبر) یا null */
   async activeSession() {
-    const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, { headers: this.headers() });
+    const res = await this.req(`${this.websiteUrl}/api/v1/freebuff/session`, { headers: this.headers() });
     if (!res.ok) return null;
     const s = await res.json().catch(() => null);
     if (s?.status === 'active' && s.instanceId) {
@@ -113,7 +150,7 @@ export class FreebuffChat {
 
   /** پایان جلسه فعلی (برای آزادسازی مدل) */
   async endSession(instanceId) {
-    const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, {
+    const res = await this.req(`${this.websiteUrl}/api/v1/freebuff/session`, {
       method: 'DELETE',
       headers: this.headers({ 'x-freebuff-instance-id': instanceId }),
     });
@@ -141,7 +178,7 @@ export class FreebuffChat {
 
   /** درخواست admission برای ساخت جلسه جدید؛ شیء جلسه را برمی‌گرداند */
   async admitSession(model) {
-    const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session/admission`, {
+    const res = await this.req(`${this.websiteUrl}/api/v1/freebuff/session/admission`, {
       method: 'POST',
       headers: this.headers({ 'x-freebuff-model': model, 'x-freebuff-wallet-spend-limit': '0' }),
     });
@@ -218,9 +255,9 @@ export class FreebuffChat {
   async accountQuota(account) {
     if (!account?.authToken) return null;
     try {
-      const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, {
+      const res = await this.req(`${this.websiteUrl}/api/v1/freebuff/session`, {
         headers: { Authorization: `Bearer ${account.authToken}` },
-      });
+      }, account.proxy ?? null);
       if (!res.ok) return null;
       const data = await res.json();
       // فقط سهمیه‌ی جلسه‌ی فعال معتبر است؛ برای اکانت بدون جلسه، پاسخ سرور
@@ -236,7 +273,7 @@ export class FreebuffChat {
 
   /** شروع فرایند ورود (مثل CLI): لینک ورود وب را برمی‌گرداند */
   async startCliLogin(fingerprintId) {
-    const res = await fetch(`${this.websiteUrl}/api/auth/cli/code`, {
+    const res = await this.req(`${this.websiteUrl}/api/auth/cli/code`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fingerprintId }),
@@ -249,7 +286,7 @@ export class FreebuffChat {
   /** بررسی وضعیت ورود؛ {ok:true, user} یا {ok:false} */
   async pollCliLogin({ fingerprintId, fingerprintHash, expiresAt }) {
     const q = new URLSearchParams({ fingerprintId, fingerprintHash, expiresAt: String(expiresAt) });
-    const res = await fetch(`${this.websiteUrl}/api/auth/cli/status?${q}`);
+    const res = await this.req(`${this.websiteUrl}/api/auth/cli/status?${q}`);
     if (res.status === 401) return { ok: false, pending: true };
     const data = await res.json().catch(() => null);
     if (res.ok && data?.user) return { ok: true, user: data.user };
@@ -258,7 +295,7 @@ export class FreebuffChat {
 
   /** شروع یک run جدید؛ runId برای متادیتای چت لازم است */
   async startRun(agentId = this.agent) {
-    const res = await fetch(`${this.websiteUrl}/api/v1/agent-runs`, {
+    const res = await this.req(`${this.websiteUrl}/api/v1/agent-runs`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ action: 'START', agentId, ancestorRunIds: [] }),
@@ -273,7 +310,7 @@ export class FreebuffChat {
 
   async finishRun(runId, status = 'completed', steps = 1) {
     try {
-      await fetch(`${this.websiteUrl}/api/v1/agent-runs`, {
+      await this.req(`${this.websiteUrl}/api/v1/agent-runs`, {
         method: 'POST',
         headers: this.headers(),
         body: JSON.stringify({
@@ -311,7 +348,7 @@ export class FreebuffChat {
     const runId = await this.startRun(agentId);
     log.info('run شروع شد', runId, `instance=${session.instanceId}`, `agent=${agentId}`);
 
-    const res = await fetch(`${this.websiteUrl}/api/v1/chat/completions`, {
+    const res = await this.req(`${this.websiteUrl}/api/v1/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({

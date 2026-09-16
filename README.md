@@ -144,19 +144,32 @@ The key rules:
 - Each **session** costs the model's **hourly price** in Freebucks, charged **once** when the
   session **starts** (not per message). Each free session lasts **1 hour**.
 - The daily budget **refills at midnight Pacific** and does **not** carry over.
-- The `🎟 session‑count cap` (today / 7‑day / month) is a **separate** counter; the real limiter is
-  Freebucks.
+- The `🎟 session‑count cap` (today 5 / 7‑day 14 / month 40) is a **separate** counter. Since each
+  session is only **1 hour**, for cheap models (like GLM) this cap runs out **before** Freebucks.
 - Some models are **premium** and also have their own small daily cap.
 
 Typical prices and how far the budget goes:
 
-| Model | Freebucks/hour | Sessions with ~70 FB |
-|---|---|---|
-| GLM 5.3 Flash · Kimi | 5 | ~14 |
-| MiMo 2.5 · Solar Pro 4 | 10 | ~7 |
-| DeepSeek V4 Flash | 15 | ~4 |
-| Luna | 20 | ~3 |
-| Gemini 3.8 | 50 | ~1 |
+| Model | Freebucks/hour | Sessions with ~70 FB | Real hours/day (session cap) |
+|---|---|---|---|
+| GLM 5.3 Flash · Kimi | 5 | ~14 | **5 h** |
+| MiMo 2.5 · Solar Pro 4 | 10 | ~7 | 5 h |
+| DeepSeek V4 Flash | 15 | ~4 | 4 h |
+| Luna | 20 | ~3 | 3 h |
+| Gemini 3.8 | 50 | ~1 | 1 h |
+
+**How many accounts for full free coverage?** (GLM; per‑account caps: day 5 · week 14 · month 40 h):
+a full day ≈ **5 accounts** · a full week ≈ **12 accounts** · a full month 24/7 ≈ **18 accounts**.
+
+### 🌐 The IP problem (`ip_capped`)
+
+The `ip_capped` limit is per **server IP** and shared by all accounts. Fix: give each account its
+own **proxy** so its requests leave from a different IP:
+
+- From the bot: "👤 Accounts → 🌐 Account proxy", or `/proxy http://user:pass@host:port`
+  (remove with `/proxy off`). Each account's proxy is stored in its file and included in backups.
+- For the `default` account set the `FREEBUFF_PROXY` variable in `.env`.
+- HTTP/HTTPS proxies are supported (e.g. `http://127.0.0.1:8080`).
 
 You can mix models. When the budget is exhausted the bot shows the reset time and offers
 **➕ Add account**, **🔄 Switch account** and **🛒 Buy plan** buttons.

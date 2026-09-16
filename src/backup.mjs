@@ -36,6 +36,7 @@ export class AccountBackup {
             fingerprintId: data.fingerprintId,
             userId: data.userId ?? null,
             email: data.email ?? null,
+            proxy: data.proxy ?? null,
           };
         } catch (e) {
           log.warn(`اکانت نامعتبر ${f}:`, e.message);
@@ -91,6 +92,7 @@ export class AccountBackup {
         fingerprintId: a.fingerprintId,
         userId: a.userId ?? null,
         email: a.email ?? null,
+        proxy: a.proxy ?? null,
       };
       fs.writeFileSync(file, JSON.stringify(out, null, 2), { mode: 0o600 });
       if (existed) updated++;
