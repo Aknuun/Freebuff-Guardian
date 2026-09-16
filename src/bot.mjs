@@ -947,8 +947,9 @@ export class GuardianBot {
       await this.chat.renewSession(model);
       return this.render(chatId, messageId, this.tr(`✅ جلسه \`${model}\` تمدید شد — ⏳ ${humanMs(this.chat.remainingMs())} دیگر`, `✅ Session \`${model}\` renewed — ⏳ ${humanMs(this.chat.remainingMs(), 'en')} left`), this.statusKeyboard());
     } catch (e) {
-      // مثلاً وقتی سهمیه تمام شده، دلیل واقعی را نشان بده
-      return this.render(chatId, messageId, `❌ ${this.chatErrorHint(e)}`, this.statusKeyboard());
+      // مثلاً وقتی سهمیه تمام شده، دلیل واقعی + دکمه‌های افزودن اکانت/خرید را نشان بده
+      const kb = this.isQuotaError(e) ? this.quotaErrorButtons() : this.statusKeyboard();
+      return this.render(chatId, messageId, `❌ ${this.chatErrorHint(e)}`, kb);
     }
   }
 
@@ -1088,7 +1089,8 @@ export class GuardianBot {
         try {
           await this.chat.renewSession(this.settings.getModel());
         } catch (e) {
-          return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: this.homeKeyboard(u) } });
+          const kb = this.isQuotaError(e) ? this.quotaErrorButtons() : this.homeKeyboard(u);
+          return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: kb } });
         }
         const session = this.state.getSession(userId, pend.name) || this.state.ensureSession(userId, pend.name);
         await answer(this.tr('جلسه ساخته شد، در حال ارسال…', 'Session started, sending…'));
@@ -1262,10 +1264,25 @@ export class GuardianBot {
     if (code === 'rate_limited' || code === 'spend_limited' || code === 'ip_capped') {
       const ms = e.data?.retryAfterMs;
       const when = ms ? humanMs(ms, this.lang()) : '';
-      const link = e.data?.upgrade?.url || 'https://freebuff.com/plans';
       return this.tr(
-        `سهمیهٔ Freebucks امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.\nمی‌توانی پلن را ارتقا بدهی: ${link}`,
-        `Your daily Freebucks are used up${when ? `; resets in ${when}` : ''}.\nYou can upgrade: ${link}`,
+        [
+          `🚫 سهمیهٔ Freebucks امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.`,
+          '',
+          '⚠️ افزودن اکانت جدید ریسک دارد و می‌تواند نقض قوانین فری‌باف باشد (احتمال بن‌شدن اکانت).',
+          '🛒 یا پلن پولی بگیر: https://freebuff.com/plans',
+          '• Starter — ۸ دلار/ماه (ماه اول ۵ دلار) · ۱۵۰ Freebucks روزانه · ۳ جلسه/روز · ۳۰/ماه',
+          '• Plus — ۲۵ دلار/ماه (ماه اول ۱۹) · ۷ جلسه/روز · ۱۰۰/ماه',
+          '• Pro — ۶۰ دلار/ماه (ماه اول ۴۵) · ۱۱ جلسه/روز · ۲۱۰/ماه',
+        ].join('\n'),
+        [
+          `🚫 Your daily Freebucks are used up${when ? `; resets in ${when}` : ''}.`,
+          '',
+          '⚠️ Adding another account is risky and may violate Freebuff rules (account ban possible).',
+          '🛒 Or get a paid plan: https://freebuff.com/plans',
+          '• Starter — $8/mo (first $5) · 150 Freebucks/day · 3 sessions/day · 30/mo',
+          '• Plus — $25/mo (first $19) · 7 sessions/day · 100/mo',
+          '• Pro — $60/mo (first $45) · 11 sessions/day · 210/mo',
+        ].join('\n'),
       );
     }
     if (body.includes('waiting_room_required') || status === 428) {
@@ -1489,6 +1506,19 @@ export class GuardianBot {
     return lines.join('\n');
   }
 
+  /** آیا خطا مربوط به تمام‌شدن سهمیه است؟ */
+  isQuotaError(e) {
+    return ['rate_limited', 'spend_limited', 'ip_capped'].includes(e?.code);
+  }
+
+  /** دکمه‌های زیر پیام اتمام سهمیه: افزودن اکانت + خرید اشتراک */
+  quotaErrorButtons() {
+    return [
+      [btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success')],
+      [{ text: this.tr('🛒 خرید اشتراک پولی', '🛒 Buy a paid plan'), url: 'https://freebuff.com/plans', style: 'primary' }],
+    ];
+  }
+
   /** دکمهٔ تمدید فقط وقتی کمتر از مقدار هشدار (پیش‌فرض ۵ دقیقه) تا انقضا مانده */
   renewKeyboardIfNear() {
     if (!this.warnMin || this.warnMin <= 0) return {};
@@ -1545,7 +1575,10 @@ export class GuardianBot {
       log.error('چت ناموفق:', e);
       const hint = this.chatErrorHint(e);
       await this.bot.deleteMessage(chatId, statusId).catch(() => {});
-      await this.send(chatId, `❌ ${hint.slice(0, 500)}`, this.renewKeyboardIfNear()).catch(() => {});
+      const extra = this.isQuotaError(e)
+        ? { reply_markup: { inline_keyboard: this.quotaErrorButtons() } }
+        : this.renewKeyboardIfNear();
+      await this.send(chatId, `❌ ${hint.slice(0, 900)}`, extra).catch(() => {});
     } finally {
       this.busy.delete(userId);
     }
