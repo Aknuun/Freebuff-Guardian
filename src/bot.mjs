@@ -2020,7 +2020,7 @@ export class GuardianBot {
   async agentLoop(chatId, userId, messages, onStep, signal) {
     const model = this.settings.getModel();
     const tools = this.serverTools();
-    const MAX_STEPS = Math.max(1, parseInt(process.env.FREEBUFF_MAX_STEPS || '12', 10) || 12);
+    const MAX_STEPS = Math.max(1, parseInt(process.env.FREEBUFF_MAX_STEPS || '40', 10) || 40);
     let thoughts = '';
     const toolLog = [];
     let emptyRetried = false;
@@ -2060,6 +2060,23 @@ export class GuardianBot {
       // اگر متن نهایی خالی بود ولی reasoning داشتیم، از reasoning استفاده کن تا کاربر پیام خالی نگیرد.
       if (!content && reasoning) content = reasoning;
       return { answer: content, thoughts, toolLog };
+    }
+    // به سقف گام‌ها رسیدیم: یک بار دیگر بدون ابزار پاسخ نهایی را بگیر تا کاربر
+    // به‌جای پیام «سقف گام» جواب واقعی بگیرد.
+    try {
+      const { message } = await this.chat.rawComplete({
+        model,
+        signal,
+        messages: [
+          ...messages,
+          { role: 'user', content: this.tr('به سقف تعداد گام‌های ابزار رسیدی. همین حالا فقط با اطلاعاتی که تا الان جمع کرده‌ای، پاسخ نهایی و کامل را بنویس؛ دیگر از هیچ ابزاری استفاده نکن.', 'You reached the tool-step limit. Now write the final, complete answer using only the information gathered so far; do not use any more tools.') },
+        ],
+      });
+      const content = String(message?.content || '').trim();
+      if (content) return { answer: content, thoughts, toolLog };
+    } catch (e) {
+      if (signal?.aborted || e?.name === 'AbortError') throw e;
+      log.warn('گرفتن پاسخ نهایی بعد از سقف گام ناموفق بود:', e.message);
     }
     return { answer: this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)'), thoughts, toolLog };
   }
