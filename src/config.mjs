@@ -105,6 +105,10 @@ export function loadConfig() {
     // محدودیت‌ها
     maxAnswerChars: parseInt(process.env.MAX_ANSWER_CHARS || '3500', 10),
     cmdTimeoutSec: parseInt(process.env.CMD_TIMEOUT_SEC || '60', 10),
+    // مهلت هر درخواست HTTP به فری‌باف (ثانیه) تا هیچ درخواستی بی‌نهایت معلق نماند
+    httpTimeoutSec: parseInt(process.env.FREEBUFF_HTTP_TIMEOUT_SEC || '180', 10),
+    // مهلت کل یک اجرای چت (ثانیه)؛ بعد از آن متوقف و علت گزارش می‌شود
+    runTimeoutSec: parseInt(process.env.FREEBUFF_RUN_TIMEOUT_SEC || '300', 10),
   };
 
   log.info('پیکربندی بارگذاری شد', `user=${cfg.allowedUserIds.join(',')}`, `model=${cfg.fbModel}`, `fbAuth=${cfg.fbAuthToken ? 'OK' : 'MISSING'}`);

@@ -160,6 +160,7 @@ export class GuardianBot {
       websiteUrl: cfg.websiteUrl,
       agent: cfg.fbAgent,
       instanceManager: instances,
+      httpTimeoutMs: (cfg.httpTimeoutSec || 180) * 1000,
     });
     this.applyActiveAccount();
     this.busy = new Set(); // userId هایی که درخواست پردازشی در جریان دارند
@@ -169,6 +170,8 @@ export class GuardianBot {
     this.sessionWarned = false;
     this.lastProbe = 0;
     this.tgFloodUntil = 0; // تا این زمان به‌خاطر 429 تلگرام درخواست نمی‌فرستیم
+    this.goneMessages = new Set(); // پیام‌هایی که حذف شده‌اند و دیگر ویرایش نمی‌شوند
+    this.pendingBusy = new Map(); // userId → پیامی که هنگام busy ماند و بعد از توقف اجرا می‌شود
     this.renewTimer = null; // تایمر تمدید خودکار جلسه
     this.autoRenewOn = state.getMeta('autoRenew') === true;
 
@@ -605,11 +608,17 @@ export class GuardianBot {
 
   /** ویرایش پیام با رعایت محدودیت flood (در زمان flood نادیده گرفته می‌شود) */
   async editText(chatId, messageId, text, extra = {}) {
-    if (this.tgFlooded()) return false;
+    if (this.tgFlooded() || this.goneMessages.has(messageId)) return false;
     try {
       await this.bot.editMessageText(text, { chat_id: chatId, message_id: messageId, ...extra });
       return true;
     } catch (e) {
+      const desc = String(e?.response?.body?.description || e?.message || '');
+      if (/message to edit not found|message can't be edited/i.test(desc)) {
+        // پیام حذف شده؛ دیگر تلاش نکن
+        this.goneMessages.add(messageId);
+        return false;
+      }
       if (!this.noteTgError(e)) log.warn('ویرایش پیام ناموفق:', e.message);
       return false;
     }
@@ -1534,16 +1543,22 @@ export class GuardianBot {
       }
 
       case 'runstop': {
-        this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+        await this.clearMarkup(chatId, messageId);
         const ac = this.aborters.get(userId);
         if (!ac) { await answer(this.tr('چیزی در حال اجرا نیست', 'Nothing is running')); return; }
         ac.abort();
         await answer(this.tr('⏹ متوقف شد', '⏹ Stopped'));
+        // پیام جدیدی که مانده بود، بعد از توقف خودکار اجرا می‌شود
         return;
       }
       case 'runcont': {
-        this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+        this.pendingBusy.delete(userId);
+        await this.clearMarkup(chatId, messageId);
         await answer(this.tr('▶️ ادامه می‌دهد…', '▶️ Continuing…'));
+        await this.send(chatId, this.tr(
+          '✅ اجرای فعلی ادامه پیدا می‌کند؛ پیام جدید نادیده گرفته شد. بعد از تمام‌شدن پاسخ، دوباره بفرست.',
+          '✅ The current run continues; your new message was ignored. Resend it after the answer finishes.',
+        )).catch(() => {});
         return;
       }
 
@@ -1849,6 +1864,12 @@ export class GuardianBot {
     const status = e.status;
     const code = e.code;
     const body = String(e.body || e.message || '').toLowerCase();
+    if (e?.name === 'TimeoutError' || /timeout|بی‌پاسخ ماند/.test(e?.message || '')) {
+      return this.tr(
+        '⏱ سرور فری‌باف دیر پاسخ داد و درخواست لغو شد.\nعلت احتمالی: کندی سرور، پروکسی، یا درخواست سنگین. دوباره بفرست؛ اگر تکرار شد پروکسی/شبکه را بررسی کن.',
+        '⏱ The Freebuff server responded too late and the request was cancelled.\nLikely cause: slow server, proxy, or a heavy request. Resend; if it repeats, check the proxy/network.',
+      );
+    }
     if (code === 'rate_limited' || code === 'spend_limited' || code === 'ip_capped') {
       const ms = e.data?.retryAfterMs;
       const when = ms ? humanMs(ms, this.lang()) : '';
@@ -1904,6 +1925,7 @@ export class GuardianBot {
     if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
     if (this.pendingProxy.has(userId)) return this.handleProxyInput(chatId, userId, text);
     if (this.busy.has(userId)) {
+      this.pendingBusy.set(userId, { chatId, text });
       return this.send(chatId, this.tr(
         '⏳ یک پاسخ هنوز در حال اجراست.\nمی‌خواهی متوقفش کنم یا ادامه بدهم؟',
         '⏳ A previous answer is still running.\nShould I stop it or continue?',
@@ -2278,6 +2300,7 @@ export class GuardianBot {
     this.aborters.set(userId, controller);
     const signal = controller.signal;
     const status = await this.send(chatId, this.tr('⏱ ۰ ثانیه · 🧠 در حال فکر کردن…', '⏱ 0s · 🧠 Thinking…'), {
+      keep: true, // پیام وضعیت نباید مثل منو با پیام بعدی پاک شود
       reply_markup: { inline_keyboard: [[btn(this.tr('⏹ توقف', '⏹ Stop'), 'runstop', 'danger')]] },
     });
     const statusId = status.message_id;
@@ -2285,12 +2308,23 @@ export class GuardianBot {
     let lastThoughts = '';
     let lastToolLog = [];
     let rendering = false;
+    let timedOut = false;
+    let lastStepAt = Date.now(); // آخرین باری که از سرور خبری رسید
     const renderProgress = async () => {
       if (rendering || this.tgFlooded()) return;
+      if (this.goneMessages.has(statusId)) { clearInterval(tick); return; }
       rendering = true;
       try {
         const secs = Math.floor((Date.now() - startedAt) / 1000);
         let body = this.tr(`⏱ ${secs} ثانیه · 🧠 در حال فکر کردن…`, `⏱ ${secs}s · 🧠 Thinking…`);
+        // اگر مدت زیادی از سرور خبری نرسیده، علت را شفاف بگو
+        const idle = Math.floor((Date.now() - lastStepAt) / 1000);
+        if (idle >= 90) {
+          body += '\n' + this.tr(
+            `⚠️ ${idle} ثانیه است منتظر پاسخ سرور فری‌باف هستم (کندی سرور/پروکسی). اگر خیلی طول کشید «⏹ توقف» را بزن.`,
+            `⚠️ Waiting ${idle}s for the Freebuff server (slow server/proxy). Tap "⏹ Stop" if it takes too long.`,
+          );
+        }
         if (lastThoughts) {
           const t = lastThoughts.length > 3200 ? '…\n' + lastThoughts.slice(-3200) : lastThoughts;
           body += '\n\n' + t;
@@ -2299,12 +2333,21 @@ export class GuardianBot {
           body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
         }
         await this.editText(chatId, statusId, body.slice(0, 3900));
+        if (this.goneMessages.has(statusId)) clearInterval(tick);
       } finally {
         rendering = false;
       }
     };
     const tick = setInterval(() => { renderProgress(); }, 4000);
     tick.unref?.();
+    // نگهبان کل اجرا: اگر اجرا از مهلت تعیین‌شده گذشت، متوقف کن و علت را بگو
+    const runTimeoutSec = this.cfg.runTimeoutSec || 300;
+    const watchdog = setTimeout(() => {
+      timedOut = true;
+      log.warn(`اجرا از مهلت ${runTimeoutSec} ثانیه گذشت؛ متوقف می‌شود`);
+      controller.abort();
+    }, runTimeoutSec * 1000);
+    watchdog.unref?.();
     try {
       const history = session.messages.slice(-16);
       const sys = this.cfg.serverTools
@@ -2319,6 +2362,7 @@ export class GuardianBot {
       let answer;
       if (this.cfg.serverTools) {
         const res = await this.agentLoop(chatId, userId, messages, ({ thoughts, toolLog }) => {
+          lastStepAt = Date.now();
           lastThoughts = thoughts || '';
           lastToolLog = toolLog || [];
           return renderProgress();
@@ -2348,6 +2392,16 @@ export class GuardianBot {
       await this.send(chatId, out);
       await this.maybeSendRenew(chatId);
     } catch (e) {
+      // نگهبان اجرا: از مهلت گذشت و خودمان متوقف کردیم
+      if (timedOut) {
+        log.warn('اجرا به‌خاطر مهلت کل متوقف شد');
+        await this.clearMarkup(chatId, statusId);
+        await this.editText(chatId, statusId, this.tr(
+          `⏱ اجرا بیش از ${runTimeoutSec} ثانیه طول کشید و متوقف شد.\nعلت: پاسخ مدل/سرور فری‌باف کند بود یا در حلقهٔ ابزار گیر کرده بود. دوباره بفرست.`,
+          `⏱ The run exceeded ${runTimeoutSec}s and was stopped.\nCause: slow Freebuff model/server or a tool loop. Please resend.`,
+        ));
+        return;
+      }
       // توقف دستی توسط کاربر (دکمهٔ «⏹ توقف»)
       if (e?.name === 'AbortError' || e?.code === 'aborted' || signal.aborted) {
         log.info('چت توسط کاربر متوقف شد');
@@ -2371,8 +2425,19 @@ export class GuardianBot {
       if (!this.isQuotaError(e)) await this.maybeSendRenew(chatId);
     } finally {
       clearInterval(tick);
+      clearTimeout(watchdog);
       this.aborters.delete(userId);
       this.busy.delete(userId);
+      // اگر هنگام busy پیامی مانده بود (و کاربر «توقف» را زد)، بعد از آزادشدن قفل اجرا کن
+      const queued = this.pendingBusy.get(userId);
+      if (queued) {
+        this.pendingBusy.delete(userId);
+        setTimeout(() => {
+          if (this.busy.has(userId)) return;
+          this.onChat({ chat: { id: queued.chatId }, from: { id: userId } }, queued.chatId, userId, queued.text)
+            .catch((err) => log.error('queuedChat:', err));
+        }, 150);
+      }
     }
   }
 }

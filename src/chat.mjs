@@ -51,11 +51,12 @@ function withCliSystemPrompt(messages) {
 }
 
 export class FreebuffChat {
-  constructor({ authToken, websiteUrl, agent, instanceManager }) {
+  constructor({ authToken, websiteUrl, agent, instanceManager, httpTimeoutMs }) {
     this.authToken = authToken;
     this.websiteUrl = websiteUrl.replace(/\/$/, '');
     this.agent = agent;
     this.instances = instanceManager;
+    this.httpTimeoutMs = httpTimeoutMs || 180000; // مهلت هر درخواست HTTP
     this.lastSession = null; // آخرین جلسه شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
     this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی جلسه بسته است هم نمایش داده می‌شود)
     this.accountName = null; // نام اکانت فعال (چند-اکانتی)
@@ -83,9 +84,22 @@ export class FreebuffChat {
   /** درخواست HTTP با پروکسی اختیاری (per-account برای تغییر IP) */
   async req(url, opts = {}, proxy = this.proxy) {
     const dispatcher = this.dispatcherFor(proxy);
+    // هر درخواست یک مهلت دارد تا هیچ‌وقت بی‌نهایت معلق نماند. سیگنال کاربر
+    // (توقف دستی) و سیگنال مهلت با هم ترکیب می‌شوند.
+    const { timeoutMs = this.httpTimeoutMs, signal, ...rest } = opts;
+    const finalSignal = (timeoutMs && timeoutMs > 0)
+      ? (signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs))
+      : signal;
+    const finalOpts = finalSignal ? { ...rest, signal: finalSignal } : rest;
     try {
-      return await undiciFetch(url, dispatcher ? { ...opts, dispatcher } : opts);
+      return await undiciFetch(url, dispatcher ? { ...finalOpts, dispatcher } : finalOpts);
     } catch (e) {
+      if (e?.name === 'TimeoutError' || /aborted due to timeout/i.test(e?.message || '')) {
+        const err = new Error(`درخواست فری‌باف بعد از ${Math.round((timeoutMs || 0) / 1000)} ثانیه بی‌پاسخ ماند (timeout).`);
+        err.name = 'TimeoutError';
+        err.cause = e;
+        throw err;
+      }
       if (proxy) {
         const err = new Error(`اتصال از طریق پروکسی «${proxy}» ناموفق بود: ${e.message}`);
         err.cause = e;
