@@ -103,6 +103,7 @@ export class GuardianBot {
     this.pendingName = new Map(); // userId → منتظر نام دلخواه اکانت هستیم
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
     this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت سشن است { chatId, text, name }
+    this.pendingSh = new Set(); // userId → منتظر دستور شل هستیم
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
@@ -188,23 +189,32 @@ export class GuardianBot {
     const list = this.accounts.list();
     const active = this.activeAccountName();
     const quotas = await Promise.all(list.map((a) => this.chat.accountQuota(a).catch(() => null)));
-    const lang = this.lang();
-    const lines = [
+    const model = this.settings.getModel();
+    const out = [
       this.tr('👤 *اکانت‌های فری‌باف*', '👤 *Freebuff accounts*'),
       this.tr(`فعال: \`${active}\``, `Active: \`${active}\``),
-      this.tr(`${list.length} اکانت`, `${list.length} account(s)`),
       '',
     ];
     list.forEach((a, i) => {
       const q = quotas[i];
+      const daily = q?.freebucks?.daily;
+      const w = q?.freeWindows;
+      const price = q?.freebucks?.prices?.[model];
       const actor = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
-      lines.push(`${a.name === active ? '✅' : '•'} ${actor}${q && q.status !== 'active' ? this.tr(' (بدون سشن)', ' (no session)') : ''}`);
-      const ql = quotaLines(q, lang);
-      if (ql.length) for (const l of ql) lines.push('   ' + l);
-      else lines.push(this.tr('   سهمیه: —', '   quota: —'));
+      out.push(`${a.name === active ? '✅' : '•'} *${actor}*${q && q.status !== 'active' ? this.tr(' — بدون سشن', ' — no session') : ''}`);
+      if (daily) {
+        const left = Math.max(0, daily.remaining ?? 0);
+        const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
+        out.push(this.tr(`   💵 مانده: *${left}* از ${daily.limit} Freebucks · استفاده‌شده: ${used}`, `   💵 Left: *${left}* of ${daily.limit} Freebucks · used: ${used}`));
+        if (price) out.push(this.tr(`   ⏱ یعنی حدود ${Math.floor(left / price)} ساعت با ${model}`, `   ⏱ ~${Math.floor(left / price)}h with ${model}`));
+      } else {
+        out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
+      }
+      if (w) out.push(this.tr(`   🎟 سشن مانده — روز ${Math.max(0, w.dayLimit - w.dayUsed)} · هفته ${Math.max(0, w.weekLimit - w.weekUsed)} · ماه ${Math.max(0, w.monthLimit - w.monthUsed)}`, `   🎟 sessions left — day ${Math.max(0, w.dayLimit - w.dayUsed)} · week ${Math.max(0, w.weekLimit - w.weekUsed)} · month ${Math.max(0, w.monthLimit - w.monthUsed)}`));
+      out.push('');
     });
-    lines.push('', this.tr('برای تعویض، روی اکانت بزن.', 'Tap an account to switch.'));
-    return lines.join('\n');
+    out.push(this.tr('برای تعویض، روی اکانت بزن.', 'Tap an account to switch.'));
+    return out.join('\n');
   }
 
   /** انتخاب نام نهایی اکانت (اگر نام دلخواه داده نشده باشد از اطلاعات کاربر) */
@@ -469,6 +479,10 @@ export class GuardianBot {
         return this.send(chatId, this.tr('🧹 تاریخچه سشن فعال پاک شد', '🧹 Active chat history cleared'));
       }
 
+      case '/sh':
+        if (!arg) return this.send(chatId, this.tr('استفاده: `/sh <دستور>`\nمثال: `/sh ls -la /`', 'Usage: `/sh <command>`\ne.g. `/sh ls -la /`'));
+        return this.runShell(chatId, arg);
+
       case '/ps': {
         try {
           const { stdout } = await execp('ps aux --sort=-%mem | head -12');
@@ -634,6 +648,7 @@ export class GuardianBot {
         '🖥 *سرور*',
         '',
         '• «📈 پروسه‌ها» — پروسه‌های پرحافظه',
+        '• «⌨️ اجرای دستور» — یک دستور شل روی سرور اجرا می‌کند (معادل /sh)',
         '• «♻️ ری‌استارت freebuff» و «⏹ توقف CLI»',
         '• «🔐 وضعیت instance» و «🔓 آزادسازی قفل»',
       ].join('\n'),
@@ -701,6 +716,7 @@ export class GuardianBot {
         '🖥 *Server*',
         '',
         '• "📈 Processes" — top memory processes',
+        '• "⌨️ Run command" — run a shell command on the server (same as /sh)',
         '• "♻️ Restart freebuff" and "⏹ Stop CLI"',
         '• "🔐 Instance status" and "🔓 Release lock"',
       ].join('\n'),
@@ -851,6 +867,7 @@ export class GuardianBot {
     return [
       [btn(this.tr('🔄 تمدید سشن', '🔄 Renew session'), 'menu:renew', 'success')],
       [btn(this.tr('📈 پروسه‌ها', '📈 Processes'), 'svc:ps', 'primary')],
+      [btn(this.tr('⌨️ اجرای دستور (/sh)', '⌨️ Run command (/sh)'), 'svc:sh', 'primary')],
       [btn(this.tr('♻️ ری‌استارت freebuff', '♻️ Restart freebuff'), 'fb:restart', 'success'), btn(this.tr('⏹ توقف CLI', '⏹ Stop CLI'), 'fb:stop', 'danger')],
       [btn(this.tr('🔐 وضعیت instance', '🔐 Instance status'), 'menu:instances', 'primary'), btn(this.tr('🔓 آزادسازی قفل', '🔓 Release lock'), 'svc:unlock', 'danger')],
       [btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')],
@@ -1140,6 +1157,10 @@ export class GuardianBot {
               return this.render(chatId, messageId, '```\n' + stdout.slice(0, 3000) + '\n```', this.serverKeyboard());
             } catch (e) { return this.render(chatId, messageId, `❌ ${e.message}`, this.serverKeyboard()); }
           }
+          case 'sh': {
+            this.pendingSh.add(userId);
+            return this.render(chatId, messageId, this.tr('⌨️ دستور شل را بفرست تا اجرا کنم (مثل `/sh`).\n⚠️ با احتیاط؛ دستور روی همین سرور اجرا می‌شود.', '⌨️ Send the shell command to run (like `/sh`).\n⚠️ Careful: it runs on this server.'), this.serverKeyboard());
+          }
           case 'unlock': {
             try {
               const cur = JSON.parse(fs.readFileSync(this.instances.botLockFile, 'utf8'));
@@ -1236,6 +1257,10 @@ export class GuardianBot {
   }
 
   async onChat(msg, chatId, userId, text) {
+    if (this.pendingSh.has(userId)) {
+      this.pendingSh.delete(userId);
+      return this.runShell(chatId, text);
+    }
     if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
     if (this.pendingAdd.has(userId)) return this.handleAccountJson(chatId, userId, text);
     if (this.busy.has(userId)) {
@@ -1268,6 +1293,20 @@ export class GuardianBot {
     }
 
     return this.runChat(chatId, userId, name, session, text);
+  }
+
+  /** اجرای یک دستور شل روی سرور و برگرداندن خروجی */
+  async runShell(chatId, command) {
+    const cmd = String(command || '').trim();
+    if (!cmd) return;
+    try {
+      const { stdout, stderr } = await execp(cmd, { timeout: (this.cfg.cmdTimeoutSec || 60) * 1000, maxBuffer: 1e6 });
+      const out = `${stdout}${stderr ? `\n${stderr}` : ''}`.trim() || this.tr('(بدون خروجی)', '(no output)');
+      return this.send(chatId, '```\n' + out.slice(0, 3500) + '\n```', { parse_mode: 'Markdown' });
+    } catch (e) {
+      const out = `${e.stdout || ''}${e.stderr || ''}`.trim() || e.message;
+      return this.send(chatId, '```\n' + out.slice(0, 3500) + '\n```', { parse_mode: 'Markdown' });
+    }
   }
 
   /** اجرای واقعی چت روی سشن موجود */
