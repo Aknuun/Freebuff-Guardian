@@ -42,7 +42,8 @@ export class FreebuffSettings {
   // --- عملیات‌های سطح بالا ---
   getMode() { return this.read().mode; }
   setMode(mode) {
-    const allowed = ['DEFAULT', 'AGENT', 'PLAN', 'PRINT'];
+    // مودهای واقعی فری‌باف (از باینری CLI): DEFAULT | LITE | MAX | PLAN
+    const allowed = ['DEFAULT', 'LITE', 'MAX', 'PLAN'];
     if (!allowed.includes(mode)) throw new Error(`مود نامعتبر: ${mode}. مجاز: ${allowed.join(' | ')}`);
     return this.write({ mode });
   }

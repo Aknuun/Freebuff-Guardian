@@ -4,7 +4,7 @@
 //   /start /help        راهنما
 //   /status             وضعیت سرور، فری‌باف و instanceها
 //   /settings           نمایش تنظیمات
-//   /mode [m]           تغییر مود (DEFAULT|AGENT|PLAN|PRINT)
+//   /mode [m]           تغییر نوع پاسخ (DEFAULT|LITE|MAX|PLAN)
 //   /model [m]          دیدن/تغییر مدل
 //   /ads on|off         تبلیغات
 //   /new [نام]          سشن چت جدید
@@ -331,10 +331,10 @@ export class GuardianBot {
         return this.send(chatId, this.settingsText(), { reply_markup: { inline_keyboard: this.settingsKeyboard() } });
 
       case '/mode': {
-        if (!arg) return this.send(chatId, `مود فعلی: \`${this.settings.getMode()}\`\nاستفاده: /mode DEFAULT|AGENT|PLAN|PRINT`);
+        if (!arg) return this.send(chatId, `نوع پاسخ فعلی: ${this.modeLabel(this.settings.getMode())}\nاستفاده: /mode DEFAULT|LITE|MAX|PLAN`);
         try {
           this.settings.setMode(arg.toUpperCase());
-          return this.send(chatId, `✅ مود روی \`${arg.toUpperCase()}\` تنظیم شد`);
+          return this.send(chatId, `✅ نوع پاسخ روی ${this.modeLabel(arg.toUpperCase())} تنظیم شد`);
         } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
       }
 
@@ -498,7 +498,7 @@ export class GuardianBot {
   /** متن دکمهٔ ثابت تایمر در پایین منو */
   timerButtonText() {
     const left = this.chat.remainingMs();
-    if (left == null) return '⏳ سشن بسته — ▶️ استارت';
+    if (left == null) return '⏳ سشن بسته — ▶️ شروع';
     return `⏳ سشن: ${humanMs(left)}`;
   }
 
@@ -507,7 +507,7 @@ export class GuardianBot {
       [
         btn(`💬 سشن‌ها (${u.activeSession ?? '—'})`, 'menu:sessions', 'primary'),
         btn('⚙️ تنظیمات', 'menu:settings', 'primary'),
-        btn(`👤 ${this.activeAccountName()}`, 'menu:account', 'primary'),
+        btn('👤 اکانت‌ها', 'menu:account', 'primary'),
       ],
       [btn('➕ سشن جدید', 'menu:new', 'success'), btn('🧹 پاک‌کردن تاریخچه', 'menu:clear', 'danger')],
       [btn('🖥 سرور', 'menu:server', 'primary'), btn('❓ راهنما', 'menu:help')],
@@ -593,7 +593,7 @@ export class GuardianBot {
       settings: [
         '⚙️ *تنظیمات*',
         '',
-        '• «🎛 مود» — حالت اجرای فری‌باف (DEFAULT/AGENT/PLAN/PRINT)',
+        '• «🎛 نوع پاسخ» — نحوهٔ پاسخ‌دهی: 🧩 پیش‌فرض · ⚡ سریع (Lite) · 🛠 ساخت کامل (Build/MAX) · 🗺 برنامه‌ریزی (Plan)',
         '• «📢 تبلیغات» — روشن/خاموش',
         '• «🤖 مدل» — مدل فعال',
         '• «⏰ هشدار انقضا» — چند دقیقه قبل هشدار بدهد (خاموش/۲/۵/۱۰)',
@@ -606,7 +606,7 @@ export class GuardianBot {
     const warn = this.warnMin > 0 ? `${this.warnMin} دقیقه قبل از انقضا` : 'خاموش';
     return [
       '⚙️ *تنظیمات*',
-      `🎛 مود: \`${this.settings.getMode()}\``,
+      `🎛 نوع پاسخ: ${this.modeLabel(this.settings.getMode())}`,
       `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`,
       `🤖 مدل: \`${this.settings.getModel()}\``,
       `👤 اکانت فعال: \`${this.activeAccountName()}\``,
@@ -620,7 +620,7 @@ export class GuardianBot {
     const warnBtn = (n, label) => btn(`${mark(n)}${label}`, `warn:${n}`, warn === n ? 'success' : undefined);
     return [
       [
-        btn(`🎛 مود: ${this.settings.getMode()}`, 'menu:mode', 'primary'),
+        btn(`🎛 نوع پاسخ: ${this.modeLabel(this.settings.getMode())}`, 'menu:mode', 'primary'),
         btn(`📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, 'menu:ads', this.settings.getAds() ? 'success' : 'danger'),
       ],
       [btn(`🤖 مدل: ${this.settings.getModel()}`, 'menu:model', 'primary')],
@@ -647,12 +647,26 @@ export class GuardianBot {
     return rows;
   }
 
+  modeLabel(id) {
+    return {
+      DEFAULT: '🧩 پیش‌فرض',
+      LITE: '⚡ سریع (Lite)',
+      MAX: '🛠 ساخت کامل (Build)',
+      PLAN: '🗺 برنامه‌ریزی (Plan)',
+    }[id] || id;
+  }
+
   modeKeyboard() {
     const cur = this.settings.getMode();
-    const modes = ['DEFAULT', 'AGENT', 'PLAN', 'PRINT'];
+    const modes = [
+      ['DEFAULT', '🧩 پیش‌فرض'],
+      ['LITE', '⚡ سریع (Lite)'],
+      ['MAX', '🛠 ساخت کامل (Build)'],
+      ['PLAN', '🗺 برنامه‌ریزی (Plan)'],
+    ];
     const rows = [];
     for (let i = 0; i < modes.length; i += 2) {
-      rows.push(modes.slice(i, i + 2).map((m) => btn(`${m === cur ? '✅ ' : ''}${m}`, `mode:${m}`, m === cur ? 'success' : 'primary')));
+      rows.push(modes.slice(i, i + 2).map(([id, label]) => btn(`${id === cur ? '✅ ' : ''}${label}`, `mode:${id}`, id === cur ? 'success' : 'primary')));
     }
     rows.push([btn('↩️ تنظیمات', 'menu:settings'), btn('🏠 منوی اصلی', 'menu:home')]);
     return rows;
@@ -717,7 +731,7 @@ export class GuardianBot {
       `⏱ ${up}`,
       `🤖 مدل: \`${this.settings.getModel()}\``,
       sess ? `🔓 سشن سرور: \`${sess.model}\` — ⏳ ${humanMs(left)} دیگر` : '🔓 سشن سرور: — (پیام بعدی سشن تازه می‌سازد)',
-      `🎛 مود: ${this.settings.getMode()}`,
+      `🎛 نوع پاسخ: ${this.modeLabel(this.settings.getMode())}`,
       `📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`,
       `🔐 ${fbSession}`,
       `💬 سشن فعال: ${this.state.user(userId).activeSession ?? '—'}`,
@@ -803,7 +817,7 @@ export class GuardianBot {
             return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
           }
           case 'model': return this.render(chatId, messageId, `🤖 *مدل‌های رایگان*\nفعلی: \`${this.settings.getModel()}\`\nبرای سوییچ روی مدل بزن.`, this.modelKeyboard());
-          case 'mode': return this.render(chatId, messageId, `🎛 *مود* (فعلی: \`${this.settings.getMode()}\`)`, this.modeKeyboard());
+          case 'mode': return this.render(chatId, messageId, `🎛 *نوع پاسخ* (فعلی: ${this.modeLabel(this.settings.getMode())})`, this.modeKeyboard());
           case 'ads': return this.render(chatId, messageId, '📢 *تبلیغات*', this.adsKeyboard());
           case 'sessions': return this.render(chatId, messageId, this.sessionsText(userId), this.sessionsKeyboard(userId));
           case 'new': {
@@ -838,9 +852,9 @@ export class GuardianBot {
       }
 
       case 'mode': {
-        try { this.settings.setMode(value); await answer(`مود روی ${value} تنظیم شد`); }
+        try { this.settings.setMode(value); await answer(`نوع پاسخ روی ${this.modeLabel(value)} تنظیم شد`); }
         catch (e) { await answer(e.message); }
-        return this.render(chatId, messageId, `🎛 *مود* (فعلی: \`${this.settings.getMode()}\`)`, this.modeKeyboard());
+        return this.render(chatId, messageId, `🎛 *نوع پاسخ* (فعلی: ${this.modeLabel(this.settings.getMode())})`, this.modeKeyboard());
       }
 
       case 'ads': {
@@ -860,7 +874,7 @@ export class GuardianBot {
         this.state.setMeta('activeAccount', value);
         this.applyActiveAccount();
         await answer(`اکانت فعال: ${value}`);
-        return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
+        return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
       }
 
       case 'accnamed':
