@@ -234,22 +234,30 @@ export class GuardianBot {
     const prev = this.pendingLogin.get(userId);
     if (prev?.timer) clearInterval(prev.timer);
 
-    const deadline = Math.min(Date.now() + 10 * 60000, code.expiresAt || 0) || Date.now() + 10 * 60000;
+    const deadline = Math.min(Date.now() + 30 * 60000, code.expiresAt || 0) || Date.now() + 30 * 60000;
     const st = { name: valid ? name : null, fingerprintId: code.fingerprintId || fingerprintId, fingerprintHash: code.fingerprintHash, expiresAt: code.expiresAt };
-    st.timer = setInterval(() => this.checkWebLogin(chatId, userId, deadline).catch(() => {}), 5000);
+    st.timer = setInterval(() => this.checkWebLogin(chatId, userId, deadline).catch((e) => log.warn('checkWebLogin:', e.message)), 5000);
     st.timer.unref?.();
     this.pendingLogin.set(userId, st);
 
     const kb = {
+      disable_web_page_preview: true,
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🔗 باز کردن صفحهٔ ورود', url: code.loginUrl, style: 'success' }],
-          [btn('❌ لغو', 'accwebcancel', 'danger')],
+          [{ text: this.tr('🔗 باز کردن صفحهٔ ورود', '🔗 Open login page'), url: code.loginUrl, style: 'success' }],
+          [
+            btn(this.tr('🔄 بررسی تأیید', '🔄 Check now'), 'accwebcheck', 'primary'),
+            btn(this.tr('🔗 ساخت لینک جدید', '🔗 New link'), `accwebnew:${st.name || ''}`, 'primary'),
+          ],
+          [btn(this.tr('❌ لغو', '❌ Cancel'), 'accwebcancel', 'danger')],
         ],
       },
     };
-    const title = st.name ? `«${st.name}»` : 'جدید';
-    return this.send(chatId, `🌐 *افزودن اکانت ${title}*\n\n۱) دکمهٔ «🔗 باز کردن صفحهٔ ورود» را بزن.\n۲) در سایت فری‌باف لاگین کن و تأیید کن.\n\n⏳ منتظر تأیید هستم…`, kb);
+    const title = st.name ? `«${st.name}»` : this.tr('جدید', 'new');
+    return this.send(chatId, this.tr(
+      `🌐 *افزودن اکانت ${title}*\n\n۱) دکمهٔ «🔗 باز کردن صفحهٔ ورود» را بزن.\n۲) در سایت فری‌باف لاگین کن و تأیید کن.\n\n⚠️ اگر سایت گفت «This login link was already used»، دکمهٔ «🔗 ساخت لینک جدید» را بزن.\n\n⏳ منتظر تأیید هستم…`,
+      `🌐 *Add account ${title}*\n\n1) Tap "🔗 Open login page".\n2) Sign in on the Freebuff site and confirm.\n\n⚠️ If the site says "This login link was already used", tap "🔗 New link".\n\n⏳ Waiting for confirmation…`,
+    ), kb);
   }
 
   /** بررسی دوره‌ای ورود وب */
@@ -262,8 +270,11 @@ export class GuardianBot {
       return this.send(chatId, `⌛ زمان ورود اکانت ${st.name ? `«${st.name}»` : ''} تمام شد. دوباره «➕ افزودن اکانت» را بزن.`);
     }
     let r;
-    try { r = await this.chat.pollCliLogin(st); } catch { return; }
-    if (!r?.ok) return;
+    try { r = await this.chat.pollCliLogin(st); } catch (e) { log.warn('poll login:', e.message); return; }
+    if (!r?.ok) {
+      if (r && r.pending === false) log.warn('وضعیت غیرمنتظرهٔ ورود:', JSON.stringify(r));
+      return;
+    }
     clearInterval(st.timer);
     this.pendingLogin.delete(userId);
     try {
@@ -1058,6 +1069,23 @@ export class GuardianBot {
       case 'accjson':
         this.pendingAdd.set(userId, value);
         return this.render(chatId, messageId, `📋 محتوای کامل فایل \`credentials.json\` اکانت «${value}» را پیست و بفرست.`, [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }]]);
+
+      case 'accwebcheck': {
+        const st = this.pendingLogin.get(userId);
+        if (!st) { await answer(this.tr('ورود فعالی نیست', 'No active login')); return home(); }
+        const r = await this.chat.pollCliLogin(st).catch(() => null);
+        if (r?.ok) return this.checkWebLogin(chatId, userId, st.expiresAt || Date.now() + 60000);
+        await answer(this.tr('هنوز تأیید نشده؛ بعد از لاگین دوباره بزن.', 'Not confirmed yet; tap again after login.'));
+        return;
+      }
+
+      case 'accwebnew': {
+        const st = this.pendingLogin.get(userId);
+        if (st?.timer) clearInterval(st.timer);
+        this.pendingLogin.delete(userId);
+        await answer(this.tr('ساخت لینک جدید…', 'Creating a new link…'));
+        return this.startWebLogin(chatId, userId, value || '');
+      }
 
       case 'accwebcancel': {
         const st = this.pendingLogin.get(userId);
