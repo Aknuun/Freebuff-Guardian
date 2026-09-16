@@ -1,298 +1,216 @@
-# 🛡️ Freebuff Guardian — نگهبان فری‌باف
+# 🛡️ Freebuff Guardian
 
 [![version](https://img.shields.io/github/v/tag/Aknuun/Freebuff-Guardian?label=version&sort=semver)](https://github.com/Aknuun/Freebuff-Guardian/tags)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](#مجوز)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
-ربات تلگرامی برای **مدیریت و چت کامل با فری‌باف (Freebuff) روی سرور، بدون نیاز به SSH**.
-همه‌چیز از داخل تلگرام — با دکمه‌های شیشه‌ای یا دستور متنی — قابل کنترل است.
-
-> 🌐 پروژهٔ اصلی فری‌باف: **https://freebuff.com** — اول باید روی سرورت نصبش کنی (بخش پیش‌نیاز پایین).
+**🌐 Languages:** [English](#-english) · [فارسی](#-فارسی) · [Русский](#-русский)
 
 ---
 
-## ✨ قابلیت‌ها
+## 🇬🇧 English
 
-### 💬 چت با فری‌باف
-- چت مستقیم با مدل‌های رایگان فری‌باف از تلگرام (`cost_mode: free`).
-- پشتیبانی از چند **جلسه چت مستقل** با تاریخچهٔ جداگانه برای هرکدام.
-- محدودسازی خودکار طول پاسخ و تعداد پیام‌های تاریخچه برای کنترل توکن.
-- تشخیص و رفع خطاهای رایج بک‌اند (۴۰۳ مود رایگان، ۴۰۹ تداخل جلسه و…).
+Telegram bot to **fully manage and chat with Freebuff on your server — no SSH needed**.
+Everything is doable from Telegram with inline buttons, a fixed bottom keyboard, or text.
 
-### 🤖 مدیریت مدل‌ها
-- لیست کامل مدل‌های رایگان با `/models` یا دکمهٔ «مدل».
-- **سوییچ واقعی مدل**: جلسه رایگان سمت سرور به یک مدل قفل است؛ ربات جلسه فعلی را
-  می‌بندد و با مدل جدید `admission` می‌زند.
-- انتخاب خودکار **agent** متناسب با مدل (رفع خطای `free_mode_invalid_agent_model`).
-- نمایش دلیل دقیق سرور وقتی مدلی موقتاً در دسترس نیست (`withdrawn` / پنجرهٔ دسترسی).
+### Features
+- 💬 **Chat** with free Freebuff models from Telegram, with multiple independent chat sessions.
+- 🤖 **Models**: real switching (closes the session and re-admits), shows each model's cost (Freebucks/hour) and today's hours left; disabled models are grayed out.
+- 🎛 **Response mode**: 🧩 Default · ⚡ Fast (Lite) · 🛠 Build (MAX) · 🗺 Plan.
+- ⚙️ **Settings**: response mode, ads, model, expiry warning.
+- 👤 **Multiple accounts** (shared use): add via **Web login** (the official CLI login flow — no server needed) or by pasting `credentials.json`. **Automatic failover** to the next account when a quota runs out.
+- ⏳ **Session timer**: the free session is a fixed 1 hour (server-side); live countdown, warning before expiry, and a renew button only near expiry.
+- 💵 **Quota**: shows used/left Freebucks and the session-count cap; clear messages when exhausted, with **Add account / Switch account / Buy plan** buttons.
+- ⌨️ **Server control (agent tools)**: the model can run `run_terminal_command`, `read_file`, `list_directory` and `write_file` on this server. Dangerous commands require confirmation.
+- 🎛 **UI**: inline buttons + a fixed bottom keyboard (`📊 Status` · `/start` · `🤖 Model`) + FA/EN language switch.
+- 🔒 **Security**: only `ALLOWED_USER_IDS` are answered.
 
-### 🎛 تنظیمات فری‌باف
-- تغییر **نوع پاسخ** (mode): 🧩 پیش‌فرض · ⚡ سریع (Lite) · 🛠 ساخت کامل (Build/MAX) · 🗺 برنامه‌ریزی (Plan).
-- روشن/خاموش‌کردن **تبلیغات**.
-- خواندن/نوشتن مستقیم همان فایل واقعی CLI: `~/.config/manicode/settings.json`.
-
-### 🗂 مدیریت جلسه‌ها
-- ساخت، سوییچ، حذف (با تأیید) و پاک‌کردن تاریخچهٔ جلسه‌ها.
-- نمایش تعداد پیام و جلسه فعال برای هر کاربر.
-
-### ⌨️ کنترل سرور توسط مدل (Server tools)
-- مدل مثل CLI فری‌باف ابزار دارد و می‌تواند روی همین سرور کار کند:
-  `run_terminal_command` (اجرای دستور)، `read_file`، `list_directory` و `write_file`.
-- **نمایش تفکرات**: به‌جای «🤔 …»، پیام «💭 در حال فکر کردن…» ساخته می‌شود و با
-  هر گام، تفکرات مدل و دستورهایی که اجرا می‌کند داخل همان پیام به‌روز می‌شود.
-- **جواب جدا**: وقتی به پاسخ رسید، جواب در یک **پیام جداگانه** فرستاده می‌شود و
-  در انتهایش **وضعیت سهمیه** (`💵 مانده/استفاده‌شده`) نوشته می‌شود.
-- دستورهای **خطرناک** (مثل `rm -rf`, `mkfs`, `dd`, `shutdown`, `curl|sh`, `:(){...}`)
-  قبل از اجرا با دکمهٔ «✅ اجرا / ❌ لغو» تأیید می‌گیرند؛ بقیه خودکار اجرا می‌شوند.
-- ربات با همان کاربر سرور (به‌طور پیش‌فرض root) اجرا می‌شود.
-- فعال/غیرفعال با `ENABLE_SERVER_TOOLS` در `.env` (هنگام نصب هم پرسیده می‌شود).
-- دستور دستی: `/sh <command>` یا دکمهٔ «⌨️ اجرای دستور» در منوی سرور.
-
-### 🖥 مدیریت سرور
-- `/ps` — پروسه‌های پرحافظه.
-- `/restart <svc>` — ری‌استارت سرویس systemd.
-- `/freebuff start|stop|restart` — کنترل CLI فری‌باف داخل tmux.
-- `/instances` و `/unlock` — وضعیت/آزادسازی قفل و instance.
-
-### 🔐 رفع خطای takeover و مدیریت instance
-- خواندن `freebuff-instance-owner.json` برای تشخیص CLI تعاملی فعال.
-- پیش از هر چت، جلسه فعال از `GET /api/v1/freebuff/session` خوانده می‌شود و از همان
-  `instanceId` استفاده می‌شود تا جلسه کاربر kick نشود (خطای ۴۰۹).
-- قفل تک‌نمونه‌ای برای خود ربات.
-
-### 👤 چند اکانت (استفادهٔ شریکی)
-- پشتیبانی از چند اکانت فری‌باف با **تعویض حساب** از داخل ربات — مناسب استفادهٔ
-  شریکی بین چند نفر که هرکدام حساب خودشان را دارند.
-- اکانت پیش‌فرض همان `credentials.json` سرور است؛ بقیه در `accounts/` نگه داشته
-  می‌شوند (خارج از گیت، با دسترسی محدود).
-- افزودن از منوی **👤 اکانت → ➕ افزودن اکانت**: یا **ورود با وب** (لینک لاگین،
-  بدون سرور) یا پیست `credentials.json` — بدون نیاز به تایپ دستور.
-- هر اکانت جلسه/سهمیهٔ مستقل خودش را دارد و در `/status` نمایش داده می‌شود.
-
-### 🎛 رابط دکمه‌ای (Inline)
-- `/menu` منوی کامل: وضعیت، تنظیمات، مدل، نوع پاسخ، تبلیغات، جلسه‌ها، سرور و instance.
-- ناوبری کامل بدون تایپ؛ حذف جلسه با تأیید.
-
-### 🔒 امنیت
-- فقط به `ALLOWED_USER_IDS` پاسخ می‌دهد؛ غریبه‌ها بی‌پاسخ می‌مانند.
-- توکن‌ها و اطلاعات حساس در `.env` و خارج از گیت نگه داشته می‌شوند.
-
----
-
-## ⚠️ پیش‌نیاز: اول فری‌باف را روی سرور نصب کن
-این ربات فقط یک **رابط** است؛ بدون فری‌باف کار نمی‌کند. قبل از هر چیز باید
-فری‌باف را روی همان سرور نصب و لاگین کنی:
-
+### ⚠️ Prerequisite: install Freebuff on the server first
+The bot is only a front-end; you must install and log in to Freebuff on the same server:
 ```bash
 npm i -g freebuff
-freebuff          # بار اول: login کن
+freebuff          # then log in
 ```
+Website: **https://freebuff.com** — after login, `~/.config/manicode/credentials.json` is created.
 
-- 🌐 سایت اصلی پروژه: **https://freebuff.com**
-- بعد از لاگین، فایل `~/.config/manicode/credentials.json` ساخته می‌شود که ربات از آن استفاده می‌کند.
-
-## 🚀 نصب سریع (تعاملی)
-اسکریپت نصب خودش توکن ربات و آیدی عددی تو را می‌پرسد:
+### 🚀 Install (one line)
 ```bash
 git clone https://github.com/Aknuun/Freebuff-Guardian.git && cd Freebuff-Guardian && bash install.sh
 ```
-اسکریپت به ترتیب این کارها را می‌کند:
-1. نصب‌بودن **Node.js** و **فری‌باف** را چک می‌کند و آدرس نصب فری‌باف را نشان می‌دهد.
-2. **توکن ربات** را می‌گیرد — از [@BotFather](https://t.me/BotFather) با دستور `/newbot`.
-3. **آیدی عددی** تو را می‌گیرد — از [@userinfobot](https://t.me/userinfobot).
-4. فایل `.env` را می‌سازد، وابستگی‌ها را نصب می‌کند و در صورت تمایل ربات را
-   به‌عنوان سرویس systemd اجرا می‌کند.
+The installer asks for:
+1. **Bot token** from [@BotFather](https://t.me/BotFather) (`/newbot`).
+2. **Your numeric id** from [@userinfobot](https://t.me/userinfobot).
+3. Whether to **enable server control** (agent tools).
 
-> اگر ترجیح می‌دهی دستی نصب کنی: `.env.example` را به `.env` کپی کن،
-> مقادیر `TELEGRAM_BOT_TOKEN` و `ALLOWED_USER_IDS` را پر کن، بعد `npm install`
-> و در نهایت `node src/index.mjs`.
+Then it writes `.env`, runs `npm install`, and optionally installs/starts a systemd service.
 
-## ⚙️ نصب به‌عنوان سرویس (دستی)
+### ⌨️ Fixed bottom keyboard
+`📊 Status` · `/start` · `🤖 Model` — always available, no typing. `/start` works exactly like the `/start` command.
+
+### 💵 Quota & Freebucks
+- Each **session** costs the model's **hourly price** in Freebucks, charged **once** when the session starts. Each session lasts **1 hour**.
+- The daily budget refills at **midnight Pacific** and does **not** carry over.
+- Prices (Freebucks/hour) and hours if you spend the whole budget on one model:
+
+| Model | FB/hour | sessions with 70 FB |
+|---|---|---|
+| GLM 5.3 Flash / Kimi | 5 | ~14 |
+| MiMo 2.5 / Solar Pro 4 | 10 | ~7 |
+| DeepSeek V4 Flash | 15 | ~4 |
+| Luna | 20 | ~3 |
+| Gemini 3.8 | 50 | ~1 |
+
+- The `🎟 session-count cap` (today/7d/month) is a **separate** counter; the real limit is Freebucks.
+- When exhausted, the bot shows the reset time and buttons: **➕ Add account**, **🔄 Switch account**, **🛒 Buy plan**.
+
+### ⏳ Session & timer
+- Fixed **1 hour** TTL on the server; chatting does **not** extend it.
+- A warning (default 5 min, configurable) before expiry, and the renew button appears **only** then.
+- Your next message auto-starts a fresh session (or fails over to another account).
+
+### ⌨️ Server control (agent tools)
+- Tools: `run_terminal_command`, `read_file`, `list_directory`, `write_file` (up to 8 steps).
+- During work, the top message shows progress; when done it becomes the **status block** (model · session time left · quota), and the answer is sent in a **separate** message.
+- **Dangerous commands** (`rm -rf`, `mkfs`, `dd`, `shutdown`, `curl|sh`, `:(){...}`, …) require a **Run/Cancel** confirmation; safe commands run automatically.
+- The bot runs as the server user (root by default). Enable/disable with `ENABLE_SERVER_TOOLS` (also asked during install).
+
+### 👤 Accounts & automatic failover
+- `/account add <name>` → choose **🌐 Web login** (a login link; sign in on the Freebuff site) or **📋 Paste credentials.json**.
+- Accounts are stored in `accounts/` (gitignored, mode 600); `default` is the server's own account.
+- When the active account's quota is exhausted, the bot **switches to the next account automatically**, starts a new session, and tells you. Works on chat errors, session start, and renew.
+
+### 📦 Release
 ```bash
-cp freebuff-guardian.service /etc/systemd/system/
-# مسیرها داخل فایل را در صورت نیاز اصلاح کن
-systemctl daemon-reload
-systemctl enable --now freebuff-guardian
-journalctl -u freebuff-guardian -f
+./release.sh patch "short title" "full description"
+./release.sh minor "New feature" "…"
+./release.sh 1.2.3 "Exact version" "…"
 ```
+It bumps the version, updates `CHANGELOG.md`, commits, tags `vX.Y.Z`, pushes, and creates a GitHub Release.
+
+### License
+MIT
 
 ---
 
-## ⌨️ دکمه‌های ثابت پایین (Reply Keyboard)
-با `/menu` یا `/start` یک **کیبورد ثابت پایین صفحه** فعال می‌شود با سه دکمه:
-`📊 وضعیت` · `/start` · `🤖 مدل` — همیشه در دسترس، بدون تایپ.
-دکمهٔ `/start` دقیقاً همان دستور `/start` را اجرا می‌کند.
+## 🇮🇷 فارسی
 
-🌐 دکمهٔ زبان (بین «سرور» و «راهنما») بین فارسی و English سوییچ می‌کند؛ رنگش پیش‌فرض (خاکستری) است. راهنما آبی و دکمهٔ تایمر پایین سبز است.
+ربات تلگرامی برای **مدیریت و چت کامل با فری‌باف روی سرور، بدون نیاز به SSH**.
+همه‌چیز از داخل تلگرام — با دکمه‌های شیشه‌ای، کیبورد ثابت پایین، یا متن — انجام می‌شود.
 
-## 🎛 رابط دکمه‌ای (inline)
-`/menu` (یا `/start`) منوی دکمه‌ای باز می‌کند. سه کار وضعیت/شروع/مدل در
-کیبورد پایین هستند، پس در منوی شیشه‌ای تکرار نشده‌اند:
-- **💬 جلسه‌ها** · **⚙️ تنظیمات** · **👤 اکانت**
-- **➕ جلسه جدید** · **🧹 پاک‌کردن تاریخچه**
-- **🖥 سرور** · **❓ راهنما**
-- **⏳ تایمر جلسه** در پایین منو (زمان باقی‌مانده؛ با زدنش وضعیت و تمدید می‌آید).
-- **⚙️ تنظیمات** زیرمنوی واقعی است: نوع پاسخ، تبلیغات، مدل و **⏰ هشدار انقضای جلسه**.
+### ✨ قابلیت‌ها
+- 💬 **چت** با مدل‌های رایگان فری‌باف از تلگرام، با چند جلسهٔ گفتگوی مستقل و تاریخچهٔ جدا.
+- 🤖 **مدل‌ها**: سوییچ واقعی (جلسه را می‌بندد و دوباره admission می‌زند)؛ نمایش قیمت هر مدل (باک/ساعت) و سهمیهٔ ساعتی امروز؛ مدل‌های غیرفعال خاکستری و غیرقابل‌انتخاب.
+- 🎛 **نوع پاسخ**: 🧩 پیش‌فرض · ⚡ سریع (Lite) · 🛠 ساخت کامل (Build/MAX) · 🗺 برنامه‌ریزی (Plan).
+- ⚙️ **تنظیمات**: نوع پاسخ، تبلیغات، مدل، هشدار انقضا.
+- 👤 **چند اکانت** (استفادهٔ شریکی): افزودن با **ورود وب** (همان مکانیزم رسمی login، بدون سرور) یا پیست `credentials.json`؛ **سوییچ خودکار** به اکانت بعدی وقتی سهمیه تمام شود.
+- ⏳ **تایمر جلسه**: جلسهٔ رایگان دقیقاً ۱ ساعت (سمت سرور)؛ شمارش زندهٔ زمان، هشدار قبل از انقضا، و دکمهٔ تمدید فقط نزدیک انقضا.
+- 💵 **سهمیه (باک)**: نمایش مانده/استفاده‌شده و سقف تعداد جلسه؛ هنگام اتمام، پیام شفاف با دکمه‌های **افزودن/تغییر اکانت** و **خرید اشتراک**.
+- ⌨️ **کنترل سرور (ابزارهای مدل)**: مدل می‌تواند `run_terminal_command`، `read_file`، `list_directory` و `write_file` اجرا کند؛ دستورهای خطرناک تأیید می‌گیرند.
+- 🎛 **رابط**: دکمه‌های شیشه‌ای + کیبورد ثابت پایین (`📊 وضعیت` · `/start` · `🤖 مدل`) + سوییچ زبان FA/EN.
+- 🔒 **امنیت**: فقط به `ALLOWED_USER_IDS` پاسخ می‌دهد.
 
-## 🔘 راهنمای دکمه‌ها
-راهنما حالا خودش دکمه‌ای است: **❓ راهنما** را بزن و بخش را انتخاب کن تا
-توضیحش همان‌جا بالا بیاید. دکمه‌ها بر اساس کارکرد رنگ دارند:
-🟦 آبی (اطلاعات/ناوبری) · 🟩 سبز (ساختن/فعال‌کردن) · 🟥 قرمز (حذف/لغو/خاموش)
-· برخی هم بدون رنگ (پیش‌فرض).
+### ⚠️ پیش‌نیاز: اول فری‌باف را روی سرور نصب کن
+```bash
+npm i -g freebuff
+freebuff          # login
+```
+سایت: **https://freebuff.com** — بعد از لاگین، فایل `~/.config/manicode/credentials.json` ساخته می‌شود.
 
-| دکمه | کار |
-|---|---|
-| 📊 وضعیت | وضعیت سرور، مدل، نوع پاسخ، جلسه فعال + تایمر و سهمیه |
-| /start | اجرای دستور `/start` (منوی اصلی) |
-| 🤖 مدل | انتخاب مدل: قیمت و سهمیهٔ ساعتی هر مدل؛ 🟩 فعلی · 🟦 قابل‌انتخاب · ⬜ غیرفعال (خاکستری) |
-| 🌐 EN | سوییچ زبان فارسی/انگلیسی (بین سرور و راهنما) |
-| 💬 جلسه‌ها | لیست/سوییچ/حذف جلسه‌های چت |
-| ➕ جلسه جدید | ساخت گفتگوی جدید |
-| 🧹 پاک‌کردن تاریخچه | پاک‌کردن پیام‌های جلسه فعال |
-| 👤 اکانت | تعویض/افزودن اکانت فری‌باف |
-| ⚙️ تنظیمات | نوع پاسخ · تبلیغات · مدل · هشدار انقضا |
-| ⏰ هشدار انقضا | خاموش / ۲ / ۵ / ۱۰ دقیقه قبل از انقضا |
-| 🔄 تمدید جلسه | بستن جلسه و ساخت جلسه تازه (ریست تایمر ۱ ساعته) |
-| 🖥 سرور | پروسه‌ها · اجرای دستور شل · ری‌استارت freebuff · instance · آزادسازی قفل |
-| ❓ راهنما | همین راهنمای بخش‌به‌بخش |
-| پیام ساده | چت با مدل فعال |
+### 🚀 نصب (یک‌خطی)
+```bash
+git clone https://github.com/Aknuun/Freebuff-Guardian.git && cd Freebuff-Guardian && bash install.sh
+```
+نصب‌کننده می‌پرسد: توکن ربات ([@BotFather](https://t.me/BotFather))، آیدی عددی ([@userinfobot](https://t.me/userinfobot)) و فعال‌بودن کنترل سرور؛ بعد `.env` می‌سازد، `npm install` می‌زند و در صورت تمایل سرویس systemd نصب می‌کند.
 
-> دستورات متنی کلاسیک (`/menu`، `/status`، `/renew`، `/model`، `/account` و…)
-> هنوز برای کاربران پیشرفته کار می‌کنند، ولی برای استفادهٔ معمولی لازم نیست.
-
----
-
-## 🧠 نکات فنی (reverse-engineering)
-
-### رفع خطای takeover
-> Another freebuff instance took over this account.
-
-این خطا وقتی رخ می‌دهد که دو نمونهٔ CLI/کلاینت با یک اکانت admission بزنند.
-ربات پیش از هر چت جلسه فعال را از `GET /api/v1/freebuff/session` می‌خواند و از
-همان `instanceId` استفاده می‌کند؛ اگر جلسهی نبود، خودش admission می‌زند.
-
-### رفع خطای مود رایگان
-> Free mode is only available through the freebuff CLI.
-
-سرور مود رایگان را تنها وقتی می‌پذیرد که پیام `system` با این جمله شروع شود:
-`You are Buffy, the coding agent behind Codebuff.`
-`chat.mjs` این پیشوند را خودکار اضافه می‌کند و دستورهای فارسی بعد از آن می‌آیند.
-
-### سوییچ مدل
-جلسه رایگان هم‌زمان فقط روی یک مدل قفل می‌شود. برای تغییر مدل، `/model`
-جلسه فعلی را می‌بندد و با مدل جدید admission می‌زند. اگر سرور مدل را
-«در دسترس نبودن» برگرداند، همان دلیل به کاربر نشان داده می‌شود.
-
----
-
-## 👤 چند اکانت (استفادهٔ شریکی)
-اگر ربات را با چند نفر شریک هستید و هرکس اکانت فری‌باف خودش را دارد:
-**منوی 👤 اکانت → «➕ افزودن اکانت»** را بزن و یکی از روش‌ها را انتخاب کن.
-(نیازی به تایپ دستور نیست؛ نام اکانت خودکار از ایمیل ساخته می‌شود، یا با
-دکمهٔ «✏️ با نام دلخواه» خودت بگذار.)
-
-### روش ۱: 🌐 ورود با وب (بدون نیاز به سرور یا نصب CLI)
-1. دکمهٔ **🌐 ورود با وب** را بزن.
-2. ربات دکمهٔ «🔗 باز کردن صفحهٔ ورود» می‌دهد؛ بزن و در سایت فری‌باف
-   لاگین کن و تأیید کن.
-3. ربات خودش تأیید را می‌فهمد و اکانت را ذخیره می‌کند.
-
-> این همان مکانیزم رسمی `freebuff login` است (device-style)، فقط از داخل ربات —
-> پس دوستت فقط به یک مرورگر نیاز دارد، نه سرور.
-
-### روش ۲: 📋 پیست credentials.json
-1. هر نفر روی سیستم خودش `freebuff login` می‌کند و فایل
-   `~/.config/manicode/credentials.json` را برمی‌دارد.
-2. دکمهٔ **📋 پیست credentials.json** را بزن و محتوا را بفرست.
-
-### تعویض حساب
-از منوی **👤 اکانت** روی اکانت بزن تا فعال شود.
-
-### سوییچ خودکار (Failover)
-اگر وسط کار **سهمیهٔ اکانت فعال تمام شود**، ربات خودکار روی اکانت بعدی
-(به‌ترتیب) سوییچ می‌کند، یک جلسهٔ تازه می‌سازد و پیام می‌دهد:
-> ♻️ سهمیهٔ اکانت «X» تمام شده؛ می‌رویم روی اکانت «Y».
-
-پس وسط جلسه قطعی حس نمی‌کنی. اگر هیچ اکانتی سهمیه نداشت، همان پیام اتمام
-سهمیه با دکمه‌های افزودن/تغییر اکانت و خرید نمایش داده می‌شود. (دستور `/account` برای
-حالت‌های پیشرفته مثل `use`/`del` هم هست.)
-
-نکته‌ها:
-- اکانت‌ها در پوشهٔ `accounts/` با دسترسی `600` ذخیره می‌شوند و در `.gitignore` هستند.
-- اکانت `default` همان حساب خود سرور است و حذف نمی‌شود.
-- جلسه و سهمیه هر اکانت جداست؛ در `/status` وضعیت اکانت فعال را می‌بینی.
-- فقط اکانت‌هایی را اضافه کن که صاحبشان رضایت دارد؛ هر اکانت برای صاحب خودش.
-
----
-
-## 💵 سهمیه و باک (مدل واقعی محدودیت)
-طبق سایت رسمی فری‌باف (https://freebuff.com)، محدودیت واقعی **باک** است:
-
-> «۱۰۰ باک هر روز که بین همهٔ مدل‌ها خرج می‌شود… قیمت هر مدل
-> بر حسب باک در ساعت است و هنگام شروع جلسه یک‌بار کم می‌شود.»
-
-- **هر جلسه = قیمت ساعتی مدل** از بودجهٔ روزانه، فقط یک‌بار در شروع جلسه.
+### 💵 سهمیه و باک
+- هر **جلسه** معادل **قیمت ساعتی** مدل است که **یک‌بار** در شروع کم می‌شود؛ هر جلسه **۱ ساعت** است.
 - بودجهٔ روزانه نیمه‌شب **Pacific** پر می‌شود و منتقل نمی‌شود.
-- ساعت‌هایی که سایت اعلام می‌کند (اگر همهٔ بودجه را روی یک مدل بگذاری):
-  GLM 5.3 Flash ۲۰س · MiMo ۱۰س · Solar ۱۰س · DeepSeek Flash ۶س · Muse ۶س · Luna ۵س.
-  یعنی قیمت‌ها تقریباً: GLM/Kimi=۵ · MiMo/Solar=۱۰ · DeepSeek=۱۵ · Luna=۲۰ · Gemini=۵۰.
-- مدل‌های «پریمیوم» (Luna / Muse / Kimi / Gemini) سقف روزانهٔ جدا هم دارند.
+- قیمت‌ها (باک/ساعت): GLM/Kimi=۵ · MiMo/Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini=۵۰.
+- `🎟 سقف تعداد جلسه` یک شمارندهٔ **جدا** است؛ محدودیت اصلی همان باک است.
+- هنگام اتمام: زمان ریست + دکمه‌های **➕ افزودن اکانت**، **🔄 تغییر اکانت**، **🛒 خرید اشتراک**.
 
-وقتی سهمیه تمام شود، ربات متن هشدار + دکمه‌های **➕ افزودن اکانت** و
-**🛒 خرید اشتراک پولی** را نشان می‌دهد. پلن‌های پولی (طبق دادهٔ اکانت):
-Starter ۸ دلار/ماه (ماه اول ۵) · Plus ۲۵ دلار (۱۹) · Pro ۶۰ دلار (۴۵).
-⚠️ افزودن اکانت اضافه ریسک دارد و ممکن است نقض قوانین فری‌باف باشد.
+### ⏳ جلسه و تایمر
+- TTL ثابت **۱ ساعت** سمت سرور؛ چت آن را تمدید نمی‌کند.
+- هشدار قبل از انقضا (پیش‌فرض ۵ دقیقه، قابل تنظیم) و دکمهٔ تمدید **فقط** در آن زمان.
+- پیام بعدی خودکار جلسهٔ تازه می‌سازد (یا به اکانت دیگری failover می‌کند).
 
-📊 ربات در هر دو بخش **وضعیت** و **👤 اکانت‌ها** مقدار **استفاده‌شده و مانده** را
-نشان می‌دهد. مثال: `💵 باک — مانده: 40/70 | استفاده‌شده: 30`.
-نکته: مقدار `🎟 جلسه 0/5` یک شمارندهٔ قدیمی جلسه است (روز/هفته/ماه)؛ محدودیت
-اصلی همان باک است. سقف روزانهٔ ۵ **مشترک همهٔ مدل‌های استاندارد** است،
-نه فقط GLM — DeepSeek و بقیه هم همین بودجه را خرج می‌کنند ولی گران‌ترند.
+### ⌨️ کنترل سرور (ابزارها)
+- ابزارها: `run_terminal_command`، `read_file`، `list_directory`، `write_file` (تا ۸ گام).
+- در حین کار، پیام بالایی پیشرفت را نشان می‌دهد؛ در پایان به **بلوک وضعیت** (مدل · زمان مانده · سهمیه) تبدیل می‌شود و جواب در پیام **جداگانه** می‌آید.
+- دستورهای **خطرناک** تأیید **اجرا/لغو** می‌گیرند؛ بقیه خودکار.
+- ربات با کاربر سرور (پیش‌فرض root) اجرا می‌شود. فعال/غیرفعال با `ENABLE_SERVER_TOOLS`.
 
-## ⏳ تایمر جلسه (۱ ساعته)
-جلسه مود رایگان **سمت سرور** و **ثابت** است: دقیقاً ۱ ساعت از لحظهٔ admission
-منقضی می‌شود و چت‌کردن آن را تمدید **نمی‌کند** (تست‌شده: `expiresAt` بعد از
-چت تغییر نمی‌کند). ربات این را بهتر مدیریت می‌کند:
+### 👤 اکانت‌ها و failover
+- `/account add <name>` → **🌐 ورود وب** یا **📋 پیست credentials.json**.
+- اکانت‌ها در `accounts/` (خارج از گیت، mode 600)؛ `default` همان حساب سرور است.
+- با تمام‌شدن سهمیهٔ اکانت فعال، ربات **خودکار روی اکانت بعدی** سوییچ می‌کند و پیام می‌دهد.
 
-- **نمایش زندهٔ تایمر** در `/status`، `/menu` و پیام‌های وضعیت.
-- **هشدار خودکار** چند دقیقه قبل از انقضا (پیش‌فرض ۵ دقیقه — قابل تنظیم با
-  `SESSION_WARN_MIN` در `.env`، مقدار `0` برای خاموش‌کردن) همراه دکمهٔ تمدید.
-- **تمدید خودکار**: اگر پیامی بفرستی و جلسه نزدیک انقضا یا منقضی شده باشد، ربات
-  خودش جلسه تازه می‌سازد؛ پس وقفه‌ای حس نمی‌کنی.
-- **`/renew` یا دکمهٔ «🔄 تمدید جلسه»**: هر وقت خواستی جلسه را ببند و تازه کن تا
-  تایمر ۱ ساعته از نو شروع شود.
-- **نمایش سهمیه**: در هر دو بخش **وضعیت** و **اکانت‌ها**، تعداد جلسه‌های
-  استفاده‌شده و مانده (روز/هفته/ماه) و باک (مانده/استفاده‌شده) از خود سرور
-  خوانده و نمایش داده می‌شود.
-
-> نکته: چون هر تمدید/سوییچ یک جلسه جدید حساب می‌شود، ربات جلسه را بیهوده تمدید
-> نمی‌کند و فقط هنگام نیاز (انقضا یا درخواست خودت) جلسه تازه می‌سازد.
-
----
-
-## 🏗 معماری
-```
-src/
-├── index.mjs      نقطهٔ ورود
-├── config.mjs     بارگذاری .env + credentials فری‌باف + نگاشت مدل→agent
-├── state.mjs      ذخیرهٔ جلسه‌ها و تاریخچه
-├── settings.mjs   خواندن/نوشتن settings.json فری‌باف
-├── instance.mjs   قفل‌ها و مدیریت instance (رفع takeover)
-├── chat.mjs       موتور چت (session + agent-runs + chat/completions)
-└── bot.mjs        رابط تلگرام، دکمه‌ها و دستورات
-```
-
----
-
-## 📦 انتشار نسخه (Release)
-برای هر تغییر، نسخه را با اسکریپت زیر منتشر کن (کامیت + برچسب نسخه + push + GitHub Release):
+### 📦 انتشار
 ```bash
-./release.sh patch "توضیح قابلیت‌های جدید"
-./release.sh minor "قابلیت بزرگ جدید"
-./release.sh 1.2.3 "نسخهٔ خاص"
+./release.sh patch "عنوان کوتاه" "توضیح کامل"
 ```
-اسکریپت نسخهٔ `package.json` و `CHANGELOG.md` را به‌روزرسانی، تگ `vX.Y.Z`
-می‌سازد و Release گیت‌هاب را با همین توضیحات ایجاد می‌کند.
 
-## مجوز
+---
+
+## 🇷🇺 Русский
+
+Telegram-бот для **полного управления Freebuff и общения с ним на вашем сервере — без SSH**.
+Всё делается из Telegram: inline-кнопки, фиксированная нижняя клавиатура или текст.
+
+### ✨ Возможности
+- 💬 **Чат** с бесплатными моделями Freebuff из Telegram, несколько независимых сессий.
+- 🤖 **Модели**: настоящее переключение (закрывает сессию и заново делает admission); показывается цена (баков/час) и остаток часов; недоступные модели серые и не нажимаются.
+- 🎛 **Режим ответа**: 🧩 По умолчанию · ⚡ Быстрый (Lite) · 🛠 Сборка (MAX) · 🗺 План.
+- ⚙️ **Настройки**: режим, реклама, модель, предупреждение об истечении.
+- 👤 **Несколько аккаунтов**: добавление через **вход в веб** (официальный login-flow, сервер не нужен) или вставкой `credentials.json`; **авто‑переключение** на следующий аккаунт при исчерпании лимита.
+- ⏳ **Таймер сессии**: сессия ровно 1 час (на стороне сервера); отсчёт, предупреждение и кнопка продления только перед истечением.
+- 💵 **Лимит (баки)**: показывается использовано/осталось и счётчик сессий; при исчерпании — понятное сообщение и кнопки **Добавить аккаунт / Сменить аккаунт / Купить план**.
+- ⌨️ **Управление сервером (инструменты модели)**: `run_terminal_command`, `read_file`, `list_directory`, `write_file`. Опасные команды требуют подтверждения.
+- 🎛 **Интерфейс**: inline-кнопки + нижняя клавиатура (`📊 Статус` · `/start` · `🤖 Модель`) + переключатель языка FA/EN.
+- 🔒 **Безопасность**: отвечает только `ALLOWED_USER_IDS`.
+
+### ⚠️ Требование: сначала установите Freebuff на сервер
+```bash
+npm i -g freebuff
+freebuff          # войти
+```
+Сайт: **https://freebuff.com** — после входа создаётся `~/.config/manicode/credentials.json`.
+
+### 🚀 Установка (одна строка)
+```bash
+git clone https://github.com/Aknuun/Freebuff-Guardian.git && cd Freebuff-Guardian && bash install.sh
+```
+Установщик спросит токен бота ([@BotFather](https://t.me/BotFather)), ваш числовой id ([@userinfobot](https://t.me/userinfobot)) и включение управления сервером; затем создаст `.env`, выполнит `npm install` и (по желанию) установит сервис systemd.
+
+### 💵 Лимит и баки
+- Каждая **сессия** стоит **часовую цену** модели в баках, списывается **один раз** при старте; сессия длится **1 час**.
+- Дневной бюджет обновляется в **полночь по Pacific** и не переносится.
+- Цены (баков/час): GLM/Kimi=5 · MiMo/Solar=10 · DeepSeek V4 Flash=15 · Luna=20 · Gemini=50.
+- `🎟 счётчик сессий` (день/7д/месяц) — **отдельный**; главный лимит — баки.
+- При исчерпании: время сброса + кнопки **➕ Добавить аккаунт**, **🔄 Сменить аккаунт**, **🛒 Купить план**.
+
+### ⏳ Сессия и таймер
+- Фиксированный TTL **1 час** на сервере; чат его не продлевает.
+- Предупреждение перед истечением (по умолчанию 5 минут) и кнопка продления **только** тогда.
+- Следующее сообщение автоматически начнёт новую сессию (или переключит аккаунт).
+
+### ⌨️ Управление сервером
+- Инструменты: `run_terminal_command`, `read_file`, `list_directory`, `write_file` (до 8 шагов).
+- Во время работы верхнее сообщение показывает прогресс; в конце становится **блоком статуса** (модель · остаток времени · лимит), а ответ приходит **отдельным** сообщением.
+- **Опасные команды** требуют подтверждения **Запустить/Отмена**; остальные выполняются автоматически.
+- Бот работает от пользователя сервера (по умолчанию root). Вкл/выкл: `ENABLE_SERVER_TOOLS`.
+
+### 👤 Аккаунты и failover
+- `/account add <name>` → **🌐 Вход в веб** или **📋 Вставить credentials.json**.
+- Аккаунты хранятся в `accounts/` (вне git, режим 600); `default` — аккаунт сервера.
+- При исчерпании лимита активного аккаунта бот **автоматически переключается** на следующий и сообщает об этом.
+
+### 📦 Релиз
+```bash
+./release.sh patch "краткий заголовок" "полное описание"
+```
+
+---
+
+## License
 MIT
