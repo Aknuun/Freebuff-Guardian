@@ -166,10 +166,17 @@ a full day ≈ **5 accounts** · a full week ≈ **12 accounts** · a full month
 The `ip_capped` limit is per **server IP** and shared by all accounts. Fix: give each account its
 own **proxy** so its requests leave from a different IP:
 
-- From the bot: "👤 Accounts → 🌐 Account proxy", or `/proxy http://user:pass@host:port`
-  (remove with `/proxy off`). Each account's proxy is stored in its file and included in backups.
+- From the bot: "👤 Accounts → 🌐 Account proxy (anti-ban by Freebuff IP detection)", or
+  `/proxy http://user:pass@host:port` (remove with `/proxy off`). Each account's proxy is stored in
+  its file and included in backups.
 - For the `default` account set the `FREEBUFF_PROXY` variable in `.env`.
-- HTTP/HTTPS proxies are supported (e.g. `http://127.0.0.1:8080`).
+- **Only HTTP/HTTPS proxies work** (e.g. `http://1.2.3.4:8080` or `http://user:pass@1.2.3.4:8080`).
+- ❌ `t.me/proxy?...` links (MTProto) are Telegram-only and will NOT work.
+- ❌ Plain SOCKS is not enough; if your client only exposes SOCKS, enable an **HTTP** inbound too
+  (xray/v2ray/sing-box) and use e.g. `http://127.0.0.1:8080`. Give each account its own inbound/proxy.
+
+Example for several IPs: run multiple xray instances with different upstreams, each exposing a local
+HTTP port (`127.0.0.1:8081`, `8082`, …), and point each account at one of them.
 
 You can mix models. When the budget is exhausted the bot shows the reset time and offers
 **➕ Add account**, **🔄 Switch account** and **🛒 Buy plan** buttons.

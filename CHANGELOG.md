@@ -3,6 +3,13 @@
 همهٔ تغییرات مهم این پروژه اینجا ثبت می‌شود. قالب بر اساس [Keep a Changelog](https://keepachangelog.com/fa/1.1.0/)
 و نسخه‌گذاری بر اساس [Semantic Versioning](https://semver.org/).
 
+## [1.21.1] - 2026-09-16
+
+### Changed
+- راهنمای واضح پروکسی و هشدار عدم پشتیبانی MTProto
+
+  برچسب دکمهٔ پروکسی با «ضد بن با تشخیص IP فری‌باف» و توضیح دقیق فرمت پروکسی HTTP/HTTPS و اینکه لینک t.me/proxy (MTProto) و SOCKS تنها کار نمی‌کنند؛ به‌روزرسانی READMEها.
+
 ## [1.21.0] - 2026-09-16
 
 ### Changed

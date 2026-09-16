@@ -500,7 +500,7 @@ export class GuardianBot {
       btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success'),
       btn(this.tr('🗑 حذف اکانت', '🗑 Delete account'), 'accdel', 'danger'),
     ]);
-    rows.push([btn(this.tr('🌐 پروکسی اکانت', '🌐 Account proxy'), 'acc:proxy', 'primary')]);
+    rows.push([btn(this.tr('🌐 پروکسی اکانت (ضد بن با تشخیص IP فری‌باف)', '🌐 Account proxy (anti-ban by Freebuff IP detection)'), 'acc:proxy', 'primary')]);
     rows.push([
       btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
       btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
@@ -708,9 +708,9 @@ export class GuardianBot {
         if (!a) return this.send(chatId, this.noAccountText(), { reply_markup: { inline_keyboard: this.noAccountKeyboard() } });
         if (!arg) {
           return this.send(chatId, this.tr(
-            `🌐 پروکسی اکانت «${a.name}»: ${a.proxy ? `\`${a.proxy}\`` : '— (بدون پروکسی)'}\nتنظیم: \`/proxy http://user:pass@host:port\`\nحذف: \`/proxy off\``,
-            `🌐 Proxy for "${a.name}": ${a.proxy ? `\`${a.proxy}\`` : '— (none)'}\nSet: \`/proxy http://user:pass@host:port\`\nRemove: \`/proxy off\``,
-          ), { reply_markup: { inline_keyboard: [[btn(this.tr('🌐 تنظیم پروکسی', '🌐 Set proxy'), 'acc:proxy', 'primary')]] } });
+            `🌐 پروکسی اکانت «${a.name}»: ${a.proxy ? `\`${a.proxy}\`` : '— (بدون پروکسی)'}\nفقط HTTP/HTTPS؛ تنظیم: \`/proxy http://user:pass@host:port\` · حذف: \`/proxy off\`\n❌ لینک \`t.me/proxy\` (MTProto) کار نمی‌کند.`,
+            `🌐 Proxy for "${a.name}": ${a.proxy ? `\`${a.proxy}\`` : '— (none)'}\nHTTP/HTTPS only; set: \`/proxy http://user:pass@host:port\` · remove: \`/proxy off\`\n❌ \`t.me/proxy\` (MTProto) won't work.`,
+          ), { reply_markup: { inline_keyboard: [[btn(this.tr('🌐 تنظیم پروکسی (ضد بن با تشخیص IP فری‌باف)', '🌐 Set proxy (anti-ban by Freebuff IP detection)'), 'acc:proxy', 'primary')]] } });
         }
         try {
           const cur = this.setActiveProxy(arg);
@@ -949,7 +949,8 @@ export class GuardianBot {
         'هر اکانت جلسه و باک مستقل دارد؛ روی دکمهٔ هر اکانت بزن تا فعال شود و اطلاعاتش همان‌جا نشان داده شود.',
         '• «▶️ شروع جلسه» برای اکانت فعال جلسه می‌سازد.',
         '• «🗑 حذف اکانت» اکانت فعال را حذف می‌کند (default حذف نمی‌شود).',
-        '• «🌐 پروکسی اکانت» برای تغییر IP هر اکانت (رفع محدودیت ip_capped).',
+        '• «🌐 پروکسی اکانت (ضد بن با تشخیص IP فری‌باف)» برای تغییر IP هر اکانت و رفع ip_capped.',
+        '  فقط پروکسی HTTP/HTTPS (مثل `http://1.2.3.4:8080`). لینک t.me/proxy (MTProto) کار نمی‌کند.',
         '• «💾 بکاپ اکانت‌ها» فایل پشتیبان می‌سازد و «♻️ ریستور از فایل» آن را برمی‌گرداند.',
       ].join('\n'),
       chat: [
@@ -1022,7 +1023,8 @@ export class GuardianBot {
         'Each account has its own session and Bucks; tap an account button to activate it and see its details right here.',
         '• "▶️ Start session" starts a session for the active account.',
         '• "🗑 Delete account" deletes the active account (default cannot be deleted).',
-        '• "🌐 Account proxy" gives each account its own IP (fixes ip_capped).',
+        '• "🌐 Account proxy (anti-ban by Freebuff IP detection)" gives each account its own IP (fixes ip_capped).',
+        '  HTTP/HTTPS only (e.g. `http://1.2.3.4:8080`). A t.me/proxy (MTProto) link will NOT work.',
         '• "💾 Backup accounts" creates a backup file and "♻️ Restore from file" brings it back.',
       ].join('\n'),
       chat: [
@@ -1554,8 +1556,8 @@ export class GuardianBot {
           if (!a) { await answer(this.tr('اکانتی نیست', 'No account')); return home(); }
           this.pendingProxy.add(userId);
           return this.render(chatId, messageId, this.tr(
-            `🌐 *پروکسی اکانت «${a.name}»*\nپروکسی فعلی: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nآدرس پروکسی را بفرست (مثلاً \`http://user:pass@host:port\`).\nبرای حذف پروکسی بنویس \`off\`.`,
-            `🌐 *Proxy for account "${a.name}"*\nCurrent: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nSend the proxy URL (e.g. \`http://user:pass@host:port\`).\nSend \`off\` to remove it.`,
+            `🌐 *پروکسی اکانت «${a.name}»* (ضد بن با تشخیص IP فری‌باف)\nپروکسی فعلی: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nفقط پروکسی *HTTP/HTTPS* کار می‌کند؛ آدرسش را بفرست، مثلاً:\n\`http://1.2.3.4:8080\`\n\`http://user:pass@1.2.3.4:8080\`\n\n❌ لینک‌های \`t.me/proxy?...\` (MTProto) فقط برای خود تلگرام‌اند و کار نمی‌کنند.\n❌ SOCKS به‌تنهایی کار نمی‌کند؛ اگر کلاینتت SOCKS دارد، یک inbound HTTP هم روشن کن (مثلاً xray/v2ray روی \`127.0.0.1:8080\`) و همان را بده.\n\nبرای حذف پروکسی بنویس \`off\`.`,
+            `🌐 *Proxy for account "${a.name}"* (anti-ban by Freebuff IP detection)\nCurrent: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nOnly *HTTP/HTTPS* proxies work; send its URL, e.g.:\n\`http://1.2.3.4:8080\`\n\`http://user:pass@1.2.3.4:8080\`\n\n❌ \`t.me/proxy?...\` links (MTProto) are Telegram-only and won't work.\n❌ Plain SOCKS won't work; if your client only has SOCKS, enable an HTTP inbound too (e.g. xray/v2ray on \`127.0.0.1:8080\`) and use that.\n\nSend \`off\` to remove the proxy.`,
           ), [
             [btn(this.tr('❌ انصراف', '❌ Cancel'), 'menu:account')],
           ]);
