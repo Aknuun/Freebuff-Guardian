@@ -31,7 +31,7 @@ const execp = promisify(exec);
 const log = makeLogger('bot');
 
 // دکمه‌های ثابت پایین تلگرام (Reply Keyboard)
-const REPLY_LABELS = new Set(['📊 وضعیت', '▶️ استارت', '🤖 مدل']);
+const REPLY_LABELS = new Set(['📊 وضعیت', '▶️ شروع', '🤖 مدل']);
 
 /** ساخت دکمه با رنگ اختیاری (style: primary=آبی، success=سبز، danger=قرمز) */
 function btn(text, callback_data, style) {
@@ -124,7 +124,7 @@ export class GuardianBot {
       reply_markup: {
         keyboard: [[
           { text: '📊 وضعیت', style: 'primary' },
-          { text: '▶️ استارت', style: 'success' },
+          { text: '▶️ شروع', style: 'success' },
           { text: '🤖 مدل', style: 'primary' },
         ]],
         resize_keyboard: true,
@@ -145,15 +145,8 @@ export class GuardianBot {
     switch (label) {
       case '📊 وضعیت':
         return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: this.statusKeyboard() } });
-      case '▶️ استارت': {
-        this.applyActiveAccount();
-        const sess = await this.chat.activeSession().catch(() => null);
-        if (!sess) {
-          try { await this.chat.renewSession(this.settings.getModel()); }
-          catch (e) { return this.send(chatId, `❌ ${e.message}`); }
-        }
-        return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: this.statusKeyboard() } });
-      }
+      case '▶️ شروع':
+        return this.render(chatId, null, this.homeText(u), this.homeKeyboard(u));
       case '🤖 مدل':
         return this.send(chatId, `🤖 *مدل‌های رایگان*\nفعلی: \`${this.settings.getModel()}\`\nبرای سوییچ روی مدل بزن.`, { reply_markup: { inline_keyboard: this.modelKeyboard() } });
       default:
@@ -512,21 +505,12 @@ export class GuardianBot {
   homeKeyboard(u) {
     return [
       [
-        btn('📊 وضعیت', 'menu:status', 'primary'),
-        btn('▶️ استارت', 'menu:start', 'success'),
-        btn('🤖 مدل', 'menu:model', 'primary'),
-      ],
-      [
         btn(`💬 سشن‌ها (${u.activeSession ?? '—'})`, 'menu:sessions', 'primary'),
         btn('⚙️ تنظیمات', 'menu:settings', 'primary'),
         btn(`👤 ${this.activeAccountName()}`, 'menu:account', 'primary'),
       ],
       [btn('➕ سشن جدید', 'menu:new', 'success'), btn('🧹 پاک‌کردن تاریخچه', 'menu:clear', 'danger')],
-      [
-        btn('🖥 سرور', 'menu:server', 'primary'),
-        btn('❓ راهنما', 'menu:help'),
-        btn('⌨️ کیبورد', 'menu:keyboard'),
-      ],
+      [btn('🖥 سرور', 'menu:server', 'primary'), btn('❓ راهنما', 'menu:help')],
       [btn(this.timerButtonText(), 'menu:timer', 'primary')],
     ];
   }
@@ -567,7 +551,7 @@ export class GuardianBot {
         'هر سشن رایگان دقیقاً ۱ ساعت عمر می‌کند و چت‌کردن تمدیدش نمی‌کند.',
         '• دکمهٔ «⏳ سشن» در پایین منو زمان باقی‌مانده را نشان می‌دهد.',
         '• ۵ دقیقه قبل از انقضا هشدار می‌آید (با «⏰ هشدار انقضا» در تنظیمات قابل تغییر).',
-        '• «▶️ استارت» اگر سشنی نباشد یکی می‌سازد؛ «🔄 تمدید سشن» تایمر را از نو می‌کند.',
+        '• «🔄 تمدید سشن» تایمر را از نو می‌کند؛ «▶️ شروع» منوی اصلی را باز می‌کند.',
         '• پیام بعدی هم خودکار سشن تازه می‌سازد؛ پس وقفه‌ای حس نمی‌کنی.',
       ].join('\n'),
       model: [
@@ -806,9 +790,7 @@ export class GuardianBot {
           case 'renew': return this.doRenew(chatId, messageId);
           case 'settings': return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
           case 'account': return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
-          case 'keyboard':
-            await this.showReplyKeyboard(chatId);
-            return this.render(chatId, messageId, this.homeText(u), this.homeKeyboard(u));
+
           case 'start': {
             const sess = await this.chat.activeSession().catch(() => null);
             if (!sess) {
