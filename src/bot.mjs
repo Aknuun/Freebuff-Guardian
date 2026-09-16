@@ -102,6 +102,7 @@ export class GuardianBot {
     this.pendingAdd = new Map(); // userId → نام اکانتی که منتظر JSON آن هستیم
     this.pendingName = new Map(); // userId → منتظر نام دلخواه اکانت هستیم
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
+    this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت سشن است { chatId, text, name }
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
@@ -992,6 +993,25 @@ export class GuardianBot {
         return this.render(chatId, messageId, this.tr('📢 *تبلیغات*', '📢 *Ads*'), this.adsKeyboard());
       }
 
+      case 'chatNew': {
+        const pend = this.pendingChat.get(userId);
+        this.pendingChat.delete(userId);
+        if (value === 'cancel' || !pend) {
+          await answer(this.tr('لغو شد', 'Cancelled'));
+          return home();
+        }
+        this.applyActiveAccount();
+        try {
+          await this.chat.renewSession(this.settings.getModel());
+        } catch (e) {
+          await answer(e.message);
+          return home();
+        }
+        const session = this.state.getSession(userId, pend.name) || this.state.ensureSession(userId, pend.name);
+        await answer(this.tr('سشن ساخته شد، در حال ارسال…', 'Session started, sending…'));
+        return this.runChat(chatId, userId, pend.name, session, pend.text);
+      }
+
       case 'acc': {
         if (value === 'add') {
           return this.render(chatId, messageId, this.tr('➕ *افزودن اکانت*\nروش را انتخاب کن (نام خودکار از ایمیل ساخته می‌شود):', '➕ *Add account*\nChoose a method (name auto-derived from email):'), this.accountMethodKeyboard());
@@ -1130,24 +1150,70 @@ export class GuardianBot {
   }
 
   // ---------- چت ----------
+  /** ترجمهٔ خطاهای بک‌اند به پیام قابل‌فهم */
+  chatErrorHint(e) {
+    const status = e.status;
+    const body = String(e.body || e.message || '').toLowerCase();
+    if (body.includes('waiting_room_required') || status === 428) {
+      return this.tr('سشن فری‌باف تمام شده بود. دوباره پیام بفرست یا «➕ ایجاد سشن جدید» را بزن.', 'Your free session had ended. Send again or tap "➕ Start session".');
+    }
+    if (body.includes('free_mode_invalid_agent_model')) {
+      return this.tr('این ترکیب مدل و agent مجاز نیست؛ از منوی «مدل» یک مدل دیگر انتخاب کن.', 'This model/agent combination is not allowed; pick another model from the Model menu.');
+    }
+    if (body.includes('free_mode_cli_required')) {
+      return this.tr('مود رایگان فعلاً فقط از طریق CLI فعال است.', 'Free mode is currently CLI-only.');
+    }
+    if (body.includes('session_superseded') || status === 409) {
+      return this.tr('تداخل سشن (۴۰۹): یک نمونهٔ دیگر سشن را گرفت. کمی بعد دوباره فرست کن.', 'Session conflict (409): another instance took the session. Try again shortly.');
+    }
+    if (body.includes('spend_limited') || body.includes('rate_limited') || body.includes('ip_capped') || status === 429) {
+      return this.tr('سهمیه/محدودیت امروز تمام شده. تا ریست بعدی صبر کن یا پلن را ارتقا بده.', 'Daily quota/rate limit reached. Wait for the reset or upgrade your plan.');
+    }
+    if (body.includes('model_unavailable')) {
+      return this.tr('این مدل موقتاً در دسترس نیست؛ مدل دیگری انتخاب کن.', 'This model is temporarily unavailable; pick another.');
+    }
+    return e.message;
+  }
+
   async onChat(msg, chatId, userId, text) {
     if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
     if (this.pendingAdd.has(userId)) return this.handleAccountJson(chatId, userId, text);
     if (this.busy.has(userId)) {
-      return this.send(chatId, '⏳ هنوز پاسخ قبلی در جریان است…');
+      return this.send(chatId, this.tr('⏳ هنوز پاسخ قبلی در جریان است…', '⏳ The previous answer is still in progress…'));
     }
     this.applyActiveAccount();
     if (!this.activeAccount()?.authToken) {
-      return this.send(chatId, '❌ credentials فری‌باف پیدا نشد. اول در سرور freebuff login کن.');
+      return this.send(chatId, this.tr('❌ credentials فری‌باف پیدا نشد. اول در سرور freebuff login کن.', '❌ Freebuff credentials not found. Run freebuff login first.'));
     }
 
     const u = this.state.user(userId);
-    const name = u.activeSession || this.state.ensureSession(userId, 'chat-1');
+    const name = u.activeSession || (this.state.ensureSession(userId, 'chat-1'), 'chat-1');
     const session = this.state.getSession(userId, name);
 
+    // برای جلوگیری از اسراف: اگر سشنی باز نیست، قبل از ساخت سشن اجازه بگیر.
+    const active = await this.chat.activeSession().catch(() => null);
+    if (!active) {
+      this.pendingChat.set(userId, { chatId, text, name });
+      return this.send(chatId, this.tr(
+        '🚫 فعلاً هیچ سشن فری‌بافی باز نیست.\nاگر بفرستی، یک سشن تازه ساخته می‌شود و از Freebucks امروزت کم می‌کند.',
+        '🚫 No freebuff session is currently open.\nIf you continue, a new session will start and use your daily Freebucks.',
+      ), {
+        reply_markup: {
+          inline_keyboard: [
+            [btn(this.tr('➕ ایجاد سشن جدید و ارسال', '➕ Start session & send'), 'chatNew:go', 'success')],
+            [btn(this.tr('❌ انصراف', '❌ Cancel'), 'chatNew:cancel', 'danger')],
+          ],
+        },
+      });
+    }
+
+    return this.runChat(chatId, userId, name, session, text);
+  }
+
+  /** اجرای واقعی چت روی سشن موجود */
+  async runChat(chatId, userId, name, session, text) {
     this.busy.add(userId);
     const progress = await this.send(chatId, '🤔 …');
-
     try {
       const history = session.messages.slice(-16);
       const messages = [
@@ -1161,15 +1227,12 @@ export class GuardianBot {
       this.state.pushMessage(userId, name, { role: 'assistant', content: answer });
 
       const out = answer.length > this.cfg.maxAnswerChars
-        ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…(بریده شد)'
-        : answer || '(پاسخ خالی)';
+        ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
+        : answer || this.tr('(پاسخ خالی)', '(empty answer)');
       await this.bot.editMessageText(out, { chat_id: chatId, message_id: progress.message_id });
     } catch (e) {
       log.error('چت ناموفق:', e);
-      let hint = e.message;
-      if (e.message.includes('409') || e.message.toLowerCase().includes('conflict')) {
-        hint = 'تداخل با سشن تعاملی فری‌باف (409). یا CLI تعاملی را ببند، یا از /instances وضعیت را ببین.';
-      }
+      const hint = this.chatErrorHint(e);
       await this.bot.editMessageText(`❌ ${hint.slice(0, 500)}`, { chat_id: chatId, message_id: progress.message_id }).catch(() => {});
     } finally {
       this.busy.delete(userId);

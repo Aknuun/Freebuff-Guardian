@@ -283,7 +283,7 @@ export class FreebuffChat {
    * یک پیام بفرست و پاسخ مدل را بگیر (بدون streaming).
    * history: آرایه‌ی {role, content}
    */
-  async complete({ model, messages, maxTokens = 2048, agent }) {
+  async complete({ model, messages, maxTokens = 2048, agent }, retry = true) {
     if (!this.authToken) throw new Error('احراز هویت فری‌باف تنظیم نشده است');
     // سشن معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
     // همان سشن admitted باشد وگرنه 409 session_superseded.
@@ -315,7 +315,16 @@ export class FreebuffChat {
     const text = await res.text();
     if (!res.ok) {
       await this.finishRun(runId, 'error');
-      throw new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);
+      // 428 = سشن بین راه تمام شده؛ یک سشن تازه بساز و یک‌بار دیگر تلاش کن.
+      if (retry && res.status === 428) {
+        log.warn('سشن منقضی شده بود (428)؛ تمدید و تلاش دوباره');
+        await this.renewSession(useModel).catch((e) => log.warn('تمدید پس از 428 ناموفق:', e.message));
+        return this.complete({ model, messages, maxTokens, agent }, false);
+      }
+      const err = new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);
+      err.status = res.status;
+      err.body = text;
+      throw err;
     }
 
     let answer = '';
