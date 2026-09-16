@@ -2332,9 +2332,13 @@ export class GuardianBot {
     let rendering = false;
     let timedOut = false;
     let lastStepAt = Date.now(); // آخرین باری که از سرور خبری رسید
+    let lastEditAt = 0; // آخرین زمان ویرایش پیام وضعیت (برای throttle)
+    const minEditMs = this.cfg.minEditMs || 0; // حداقل فاصله ویرایش‌ها تا flood تلگرام
     const renderProgress = async () => {
       if (rendering || this.tgFlooded()) return;
       if (this.goneMessages.has(statusId)) { clearInterval(tick); return; }
+      // اگر از آخرین ویرایش زمان کافی نگذشته، رد کن؛ تیک بعدی خودش ویرایش می‌کند
+      if (minEditMs > 0 && Date.now() - lastEditAt < minEditMs) return;
       rendering = true;
       try {
         const secs = Math.floor((Date.now() - startedAt) / 1000);
@@ -2358,6 +2362,7 @@ export class GuardianBot {
           const recent = lastToolLog.slice(-2).map((t) => (t.length > 90 ? t.slice(0, 90) + '…' : t));
           body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + recent.map((t) => '• ' + t).join('\n');
         }
+        lastEditAt = Date.now();
         await this.editText(chatId, statusId, body.slice(0, 3900));
         if (this.goneMessages.has(statusId)) clearInterval(tick);
       } finally {

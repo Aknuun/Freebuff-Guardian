@@ -109,6 +109,8 @@ export function loadConfig() {
     httpTimeoutSec: parseInt(process.env.FREEBUFF_HTTP_TIMEOUT_SEC || '180', 10),
     // مهلت کل یک اجرای چت (ثانیه)؛ بعد از آن متوقف و علت گزارش می‌شود
     runTimeoutSec: parseInt(process.env.FREEBUFF_RUN_TIMEOUT_SEC || '300', 10),
+    // حداقل فاصله بین ویرایش‌های پیام وضعیت (میلی‌ثانیه) تا به flood تلگرام نخوریم
+    minEditMs: parseInt(process.env.FREEBUFF_MIN_EDIT_MS || '3000', 10),
   };
 
   log.info('پیکربندی بارگذاری شد', `user=${cfg.allowedUserIds.join(',')}`, `model=${cfg.fbModel}`, `fbAuth=${cfg.fbAuthToken ? 'OK' : 'MISSING'}`);
