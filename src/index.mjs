@@ -19,6 +19,14 @@ async function main() {
   const state = new StateStore(cfg.stateFile);
   new GuardianBot(cfg, state, instances);
 
+  // هیچ خطای پیش‌بینی‌نشده‌ای ربات را بی‌صدا نکشد
+  process.on('unhandledRejection', (e) => log.error('unhandledRejection:', e));
+  process.on('uncaughtException', (e) => {
+    log.error('uncaughtException:', e);
+    // systemd (Restart=always) بلافاصله ربات را دوباره بالا می‌آورد
+    process.exit(1);
+  });
+
   log.info('🛡️ نگهبان فری‌باف بالا آمد');
 }
 

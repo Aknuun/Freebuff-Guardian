@@ -2312,10 +2312,19 @@ export class GuardianBot {
     const controller = new AbortController();
     this.aborters.set(userId, controller);
     const signal = controller.signal;
-    const status = await this.send(chatId, this.tr('⏱ ۰ ثانیه · 🧠 در حال فکر کردن…', '⏱ 0s · 🧠 Thinking…'), {
-      keep: true, // پیام وضعیت نباید مثل منو با پیام بعدی پاک شود
-      reply_markup: { inline_keyboard: [[btn(this.tr('⏹ توقف', '⏹ Stop'), 'runstop', 'danger')]] },
-    });
+    let status;
+    try {
+      status = await this.send(chatId, this.tr('⏱ ۰ ثانیه · 🧠 در حال فکر کردن…', '⏱ 0s · 🧠 Thinking…'), {
+        keep: true, // پیام وضعیت نباید مثل منو با پیام بعدی پاک شود
+        reply_markup: { inline_keyboard: [[btn(this.tr('⏹ توقف', '⏹ Stop'), 'runstop', 'danger')]] },
+      });
+    } catch (e) {
+      // اگر حتی ارسال پیام وضعیت شکست خورد، قفل busy آزاد شود تا ربات قفل نماند
+      log.error('ارسال پیام وضعیت ناموفق:', e.message);
+      this.aborters.delete(userId);
+      this.busy.delete(userId);
+      return;
+    }
     const statusId = status.message_id;
     const startedAt = Date.now();
     let lastThoughts = '';
