@@ -2072,6 +2072,8 @@ export class GuardianBot {
     let thoughts = '';
     const toolLog = [];
     let emptyRetried = false;
+    const callCounts = new Map(); // امضای فراخوانی ابزار → تعداد تکرار
+    const MAX_REPEAT = Math.max(1, parseInt(process.env.FREEBUFF_MAX_TOOL_REPEAT || '2', 10) || 2);
     for (let step = 0; step < MAX_STEPS; step++) {
       if (signal?.aborted) throw abortError();
       const { message } = await this.chat.rawComplete({ model, messages, tools, signal });
@@ -2082,6 +2084,7 @@ export class GuardianBot {
       const calls = message?.tool_calls;
       if (Array.isArray(calls) && calls.length) {
         messages.push({ role: 'assistant', content: message.content || '', tool_calls: calls });
+        let repeated = false;
         for (const call of calls) {
           if (signal?.aborted) throw abortError();
           let desc = call?.function?.name || 'tool';
@@ -2089,11 +2092,23 @@ export class GuardianBot {
             const a = JSON.parse(call?.function?.arguments || '{}');
             desc = call.function.name === 'run_terminal_command' ? `$ ${a.command}` : `${call.function.name} ${a.path || ''}`.trim();
           } catch { /* ignore */ }
+          const sig = `${call?.function?.name || ''}:${call?.function?.arguments || ''}`;
+          const n = (callCounts.get(sig) || 0) + 1;
+          callCounts.set(sig, n);
+          if (n > MAX_REPEAT) {
+            // مدل در حلقهٔ تکراری افتاده؛ ابزار را اجرا نکن و برو سراغ پاسخ نهایی
+            toolLog.push(this.tr(`↩️ تکرار «${desc}» اجرا نشد`, `↩️ repeated "${desc}" skipped`));
+            messages.push({ role: 'tool', tool_call_id: call.id, name: call?.function?.name, content: 'error: identical tool call repeated; do not call it again. Use the information you already have and write the final answer.' });
+            repeated = true;
+            continue;
+          }
           toolLog.push(desc);
           if (onStep) await onStep({ thoughts, toolLog }).catch(() => {});
           const result = await this.executeTool(chatId, userId, call, signal);
           messages.push({ role: 'tool', tool_call_id: call.id, name: call?.function?.name, content: String(result) });
         }
+        if (onStep) await onStep({ thoughts, toolLog }).catch(() => {});
+        if (repeated) break; // حلقهٔ تکراری → پاسخ نهایی
         continue;
       }
       let content = (message?.content || '').toString().trim();
@@ -2120,7 +2135,8 @@ export class GuardianBot {
           { role: 'user', content: this.tr('به سقف تعداد گام‌های ابزار رسیدی. همین حالا فقط با اطلاعاتی که تا الان جمع کرده‌ای، پاسخ نهایی و کامل را بنویس؛ دیگر از هیچ ابزاری استفاده نکن.', 'You reached the tool-step limit. Now write the final, complete answer using only the information gathered so far; do not use any more tools.') },
         ],
       });
-      const content = String(message?.content || '').trim();
+      const content = String(message?.content || '').trim()
+        || String(message?.reasoning_content || message?.reasoning || '').trim();
       if (content) return { answer: content, thoughts, toolLog };
     } catch (e) {
       if (signal?.aborted || e?.name === 'AbortError') throw e;
