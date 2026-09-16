@@ -614,6 +614,8 @@ export class GuardianBot {
       return true;
     } catch (e) {
       const desc = String(e?.response?.body?.description || e?.message || '');
+      // محتوای پیام تغییری نکرده؛ خطا نیست
+      if (/message is not modified/i.test(desc)) return true;
       if (/message to edit not found|message can't be edited/i.test(desc)) {
         // پیام حذف شده؛ دیگر تلاش نکن
         this.goneMessages.add(messageId);
@@ -1572,6 +1574,10 @@ export class GuardianBot {
         // دکمه‌های تأیید دیگر لازم نیستند
         if (this.menuMsg.get(chatId) === messageId) this.menuMsg.delete(chatId);
         this.bot.deleteMessage(chatId, messageId).catch(() => {});
+        if (this.busy.has(userId)) {
+          await answer(this.tr('یک اجرا در جریان است', 'A run is in progress'));
+          return;
+        }
         this.applyActiveAccount();
         try {
           await this.chat.renewSession(this.settings.getModel());
@@ -1936,11 +1942,16 @@ export class GuardianBot {
         ]] },
       });
     }
+    // رزرو فوری قفل تا پیام‌های هم‌زمان نتوانند دو اجرا راه بیندازند
+    this.busy.add(userId);
+    const releaseBusy = () => this.busy.delete(userId);
     this.applyActiveAccount();
     if (this.hasNoAccount()) {
+      releaseBusy();
       return this.send(chatId, this.noAccountText(), { reply_markup: { inline_keyboard: this.noAccountKeyboard() } });
     }
     if (!this.activeAccount()?.authToken) {
+      releaseBusy();
       return this.send(chatId, this.tr('❌ credentials فری‌باف پیدا نشد. اول در سرور freebuff login کن.', '❌ Freebuff credentials not found. Run freebuff login first.'));
     }
 
@@ -1948,9 +1959,10 @@ export class GuardianBot {
     const name = u.activeSession || (this.state.ensureSession(userId, 'chat-1'), 'chat-1');
     const session = this.state.getSession(userId, name);
 
-    // برای جلوگیری از اسراف: اگر جلسهی باز نیست، قبل از ساخت جلسه اجازه بگیر.
+    // برای جلوگیری از اسراف: اگر جلسه‌ی باز نیست، قبل از ساخت جلسه اجازه بگیر.
     const active = await this.chat.activeSession().catch(() => null);
     if (!active) {
+      releaseBusy();
       this.pendingChat.set(userId, { chatId, text, name });
       return this.send(chatId, this.tr(
         '🚫 فعلاً هیچ جلسه فری‌بافی باز نیست.\nاگر بفرستی، یک جلسه تازه ساخته می‌شود و از باک امروزت کم می‌کند.',
@@ -2295,6 +2307,7 @@ export class GuardianBot {
   }
 
   async runChat(chatId, userId, name, session, text, attempt = 0) {
+    if (process.env.DEBUG_CALLER === '1') log.info('RUNCHAT-CALLER', JSON.stringify({busy: this.busy.has(userId), pend: this.pendingBusy.has(userId), text: String(text).slice(0,40), stack: new Error().stack.split('\n').slice(2,7).map(x=>x.trim()).join(' << ')}));
     this.busy.add(userId);
     const controller = new AbortController();
     this.aborters.set(userId, controller);
