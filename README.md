@@ -4,213 +4,266 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
-**🌐 Languages:** [English](#-english) · [فارسی](#-فارسی) · [Русский](#-русский)
+**🌐 Languages:** **English** · [فارسی](README.fa.md) · [Русский](README.ru.md)
 
 ---
 
-## 🇬🇧 English
+## About Freebuff
 
-Telegram bot to **fully manage and chat with Freebuff on your server — no SSH needed**.
-Everything is doable from Telegram with inline buttons, a fixed bottom keyboard, or text.
+**Freebuff** is a *100% free* AI coding agent, funded by ads instead of a subscription.
+It ships in several forms — **CLI**, **Desktop**, **Web**, **Cloud** and **Chat** — and lets you
+use powerful coding models at no cost. It runs directly on your machine/server and works on
+your real files and commands.
 
-### Features
-- 💬 **Chat** with free Freebuff models from Telegram, with multiple independent chat sessions.
-- 🤖 **Models**: real switching (closes the session and re-admits), shows each model's cost (Freebucks/hour) and today's hours left; disabled models are grayed out.
-- 🎛 **Response mode**: 🧩 Default · ⚡ Fast (Lite) · 🛠 Build (MAX) · 🗺 Plan.
-- ⚙️ **Settings**: response mode, ads, model, expiry warning.
-- 👤 **Multiple accounts** (shared use): add via **Web login** (the official CLI login flow — no server needed) or by pasting `credentials.json`. **Automatic failover** to the next account when a quota runs out.
-- ⏳ **Session timer**: the free session is a fixed 1 hour (server-side); live countdown, warning before expiry, and a renew button only near expiry.
-- 💵 **Quota**: shows used/left Freebucks and the session-count cap; clear messages when exhausted, with **Add account / Switch account / Buy plan** buttons.
-- ⌨️ **Server control (agent tools)**: the model can run `run_terminal_command`, `read_file`, `list_directory` and `write_file` on this server. Dangerous commands require confirmation.
-- 🎛 **UI**: inline buttons + a fixed bottom keyboard (`📊 Status` · `/start` · `🤖 Model`) + FA/EN language switch.
-- 🔒 **Security**: only `ALLOWED_USER_IDS` are answered.
+- 🌐 Website: **https://freebuff.com**
+- 💻 CLI install: `npm i -g freebuff` then run `freebuff`
+- 🧩 Free for everyone: no API key, no credit card
+- 📉 Limited by a daily **Freebucks** budget (see below)
 
-### ⚠️ Prerequisite: install Freebuff on the server first
-The bot is only a front-end; you must install and log in to Freebuff on the same server:
+`Freebuff Guardian` is an independent Telegram front-end for Freebuff; it is **not** affiliated
+with the Freebuff team. You still need a Freebuff account and the CLI on the same server.
+
+## What is Freebuff Guardian?
+
+A Telegram bot that lets you **fully manage Freebuff and chat with it on your server — without SSH**.
+You install it once, and from then on everything happens inside Telegram: chatting with the model,
+switching models, controlling the server, managing several Freebuff accounts, watching your quota,
+and letting the model run commands on your machine.
+
+It is designed for people who run Freebuff on a remote VPS and want convenient, phone‑friendly
+control over it (and over the server itself) from anywhere.
+
+## ✨ Features
+
+- 💬 **Chat with the free models** from Telegram, with multiple independent chat sessions and
+  separate history per session.
+- 🤖 **Model management**: a real switch — the bot closes the current free session and re‑admits
+  with the requested model (the server locks a free session to one model). Each model shows its
+  **cost (Freebucks/hour)** and the **hours left today**; models that are unavailable are shown
+  **gray and non‑clickable**.
+- 🎛 **Response mode**: 🧩 Default · ⚡ Fast (Lite) · 🛠 Build (MAX) · 🗺 Plan — the same modes the
+  CLI exposes.
+- ⚙️ **Settings menu**: response mode, ads on/off, active model, and the expiry‑warning threshold.
+- 👤 **Multiple Freebuff accounts** (shared use): add an account via the official **Web login**
+  flow (no server needed for that account) or by pasting a `credentials.json`. The bot can
+  **automatically fail over** to the next account when one runs out of quota.
+- ⏳ **Session timer**: the free session has a fixed **1‑hour** lifetime on the server; the bot shows
+  a live countdown, warns you before expiry, and shows a **renew** button only near expiry.
+- 💵 **Quota view**: used/left **Freebucks** and the separate session‑count cap, in both the status
+  and the accounts screens. When the quota is exhausted, you get a clear message plus
+  **Add account / Switch account / Buy plan** buttons.
+- ⌨️ **Server control (agent tools)**: the model can run `run_terminal_command`, `read_file`,
+  `list_directory` and `write_file` on this server, in a multi‑step loop. Dangerous commands
+  require a **Run / Cancel** confirmation.
+- 🎛 **Two UIs at once**: inline (glass) buttons for everything, plus a **fixed bottom keyboard**
+  (`📊 Status` · `/start` · `🤖 Model`) and a **FA/EN language switch**.
+- 🔒 **Security**: the bot answers **only** to the numeric ids listed in `ALLOWED_USER_IDS`.
+
+## 🧠 How it works (briefly)
+
+Freebuff's free mode is only accepted by the backend when the request looks like the official
+CLI. The bot reverse‑engineers that behaviour and reproduces it:
+
+1. It reads your Freebuff credentials from `~/.config/manicode/credentials.json`.
+2. It opens/uses a free **session** (`/api/v1/freebuff/session`) valid for one hour.
+3. It calls the model with `cost_mode: free` and a system prompt that starts exactly with
+   `You are Buffy, the coding agent behind Codebuff.` (otherwise the server replies
+   `free_mode_cli_required`).
+4. For tool‑calling, it sends tool definitions and executes the requested tools **locally**,
+   feeding the results back to the model.
+5. It keeps the session's `instanceId`, so it never kicks an interactive CLI session (HTTP 409).
+
+## ⚠️ Prerequisite: install Freebuff on the server first
+
+The bot is only a front‑end; it cannot work without Freebuff being installed and logged in on the
+same server:
+
 ```bash
 npm i -g freebuff
-freebuff          # then log in
+freebuff          # first run asks you to log in
 ```
-Website: **https://freebuff.com** — after login, `~/.config/manicode/credentials.json` is created.
 
-### 🚀 Install (one line)
+After logging in, `~/.config/manicode/credentials.json` is created. If you want to chat with a
+paid plan, you can upgrade at **https://freebuff.com/plans**.
+
+## 🚀 Install
+
+### One‑line install (recommended)
 ```bash
 git clone https://github.com/Aknuun/Freebuff-Guardian.git && cd Freebuff-Guardian && bash install.sh
 ```
-The installer asks for:
+The installer (fully in English) asks for:
 1. **Bot token** from [@BotFather](https://t.me/BotFather) (`/newbot`).
 2. **Your numeric id** from [@userinfobot](https://t.me/userinfobot).
 3. Whether to **enable server control** (agent tools).
 
-Then it writes `.env`, runs `npm install`, and optionally installs/starts a systemd service.
+It then writes `.env`, runs `npm install`, and optionally installs and starts a systemd service.
 
-### ⌨️ Fixed bottom keyboard
-`📊 Status` · `/start` · `🤖 Model` — always available, no typing. `/start` works exactly like the `/start` command.
+### Manual install
+```bash
+git clone https://github.com/Aknuun/Freebuff-Guardian.git
+cd Freebuff-Guardian
+cp .env.example .env      # then edit TELEGRAM_BOT_TOKEN and ALLOWED_USER_IDS
+npm install
+node src/index.mjs
+```
 
-### 💵 Quota & Freebucks
-- Each **session** costs the model's **hourly price** in Freebucks, charged **once** when the session starts. Each session lasts **1 hour**.
-- The daily budget refills at **midnight Pacific** and does **not** carry over.
-- Prices (Freebucks/hour) and hours if you spend the whole budget on one model:
+### systemd service (manual)
+```bash
+cp freebuff-guardian.service /etc/systemd/system/
+# adjust paths if needed
+systemctl daemon-reload
+systemctl enable --now freebuff-guardian
+journalctl -u freebuff-guardian -f
+```
 
-| Model | FB/hour | sessions with 70 FB |
+## ⌨️ Fixed bottom keyboard
+
+Send `/menu` or `/start` once and Telegram shows a fixed keyboard at the bottom:
+`📊 Status` · `/start` · `🤖 Model`. It stays available, so you rarely need to type a command.
+The `/start` button behaves exactly like the `/start` command.
+
+## 🔘 Button reference
+
+The in‑bot **Help** is button‑based: tap any section and its explanation shows in place.
+Buttons are colour‑coded by purpose: 🟦 info/navigation · 🟩 create/enable · 🟥 delete/cancel/off
+· some are neutral (default).
+
+| Button | What it does |
+|---|---|
+| 📊 Status | Server load, model, response mode, active session, quota, timer |
+| /start | Opens the home menu (same as the command) |
+| 🤖 Model | Switch model (shows cost + hours left; unavailable are gray) |
+| 💬 Chats | List, switch and delete chat sessions (delete asks for confirmation) |
+| ➕ New chat | Create a new conversation |
+| 🧹 Clear history | Clear the active chat's messages |
+| 👤 Accounts | Switch/add Freebuff accounts, see per‑account quota |
+| ⚙️ Settings | Response mode · Ads · Model · Expiry warning |
+| ⏰ Expiry warning | Off / 2 / 5 / 10 minutes before session expiry |
+| 🔄 Renew session | Close the session and start a fresh one (resets the 1‑hour timer) |
+| 🖥 Server | Processes · Run command (`/sh`) · restart freebuff · instance · release lock |
+| ❓ Help | Section‑by‑section help |
+| Plain message | Chat with the active model |
+
+## 💵 Quota & Freebucks (the real limit)
+
+Freebuff gives a **daily budget** called **Freebucks**, shared across all models.
+The key rules:
+
+- Each **session** costs the model's **hourly price** in Freebucks, charged **once** when the
+  session **starts** (not per message). Each free session lasts **1 hour**.
+- The daily budget **refills at midnight Pacific** and does **not** carry over.
+- The `🎟 session‑count cap` (today / 7‑day / month) is a **separate** counter; the real limiter is
+  Freebucks.
+- Some models are **premium** and also have their own small daily cap.
+
+Typical prices and how far the budget goes:
+
+| Model | Freebucks/hour | Sessions with ~70 FB |
 |---|---|---|
-| GLM 5.3 Flash / Kimi | 5 | ~14 |
-| MiMo 2.5 / Solar Pro 4 | 10 | ~7 |
+| GLM 5.3 Flash · Kimi | 5 | ~14 |
+| MiMo 2.5 · Solar Pro 4 | 10 | ~7 |
 | DeepSeek V4 Flash | 15 | ~4 |
 | Luna | 20 | ~3 |
 | Gemini 3.8 | 50 | ~1 |
 
-- The `🎟 session-count cap` (today/7d/month) is a **separate** counter; the real limit is Freebucks.
-- When exhausted, the bot shows the reset time and buttons: **➕ Add account**, **🔄 Switch account**, **🛒 Buy plan**.
+You can mix models. When the budget is exhausted the bot shows the reset time and offers
+**➕ Add account**, **🔄 Switch account** and **🛒 Buy plan** buttons.
 
-### ⏳ Session & timer
-- Fixed **1 hour** TTL on the server; chatting does **not** extend it.
-- A warning (default 5 min, configurable) before expiry, and the renew button appears **only** then.
-- Your next message auto-starts a fresh session (or fails over to another account).
+Paid plans (as reported by the account):
+Starter **$8/mo** (first month $5) · Plus **$25/mo** (first $19) · Pro **$60/mo** (first $45).
 
-### ⌨️ Server control (agent tools)
-- Tools: `run_terminal_command`, `read_file`, `list_directory`, `write_file` (up to 8 steps).
-- During work, the top message shows progress; when done it becomes the **status block** (model · session time left · quota), and the answer is sent in a **separate** message.
-- **Dangerous commands** (`rm -rf`, `mkfs`, `dd`, `shutdown`, `curl|sh`, `:(){...}`, …) require a **Run/Cancel** confirmation; safe commands run automatically.
-- The bot runs as the server user (root by default). Enable/disable with `ENABLE_SERVER_TOOLS` (also asked during install).
+## ⏳ Session & timer
 
-### 👤 Accounts & automatic failover
-- `/account add <name>` → choose **🌐 Web login** (a login link; sign in on the Freebuff site) or **📋 Paste credentials.json**.
-- Accounts are stored in `accounts/` (gitignored, mode 600); `default` is the server's own account.
-- When the active account's quota is exhausted, the bot **switches to the next account automatically**, starts a new session, and tells you. Works on chat errors, session start, and renew.
+- A free session lives exactly **1 hour** (server‑side) and **chatting does not extend it**.
+- The bot shows the remaining time in `/status`, the home menu and the status block.
+- A warning appears before expiry (default **5 min**, configurable via Settings → ⏰ Expiry warning).
+- The **renew** button appears **only** near expiry; otherwise the answer has no buttons.
+- Your next message auto‑starts a fresh session, and if the current account has no quota the bot
+  **fails over** to another account automatically.
 
-### 📦 Release
+## ⌨️ Server control (agent tools)
+
+When `ENABLE_SERVER_TOOLS=true` (asked during install), the model gets tools and can do real work
+on your server in a multi‑step loop (up to 8 steps):
+
+- `run_terminal_command` — run any shell command (with optional `cwd`, `timeoutSec`).
+- `read_file` — read a text file.
+- `list_directory` — list a directory.
+- `write_file` — create/overwrite a file.
+
+Behaviour:
+- While working, the **top message** shows progress (a thinking indicator and the commands being
+  run). When the model is done, that message turns into the **status block**
+  (model · session time left · quota), and the **answer is sent as a separate message**.
+- **Dangerous commands** — e.g. `rm -rf`, `mkfs`, `dd if=`, `shutdown`/`reboot`, `curl|sh`,
+  `:(){...}`, `iptables -F` — are shown with **✅ Run / ❌ Cancel** buttons and only run after you
+  confirm. Safe commands run automatically.
+- The bot runs as the server user (root by default). Prefer the manual `/sh <command>` or the
+  Server → Run command button when you want to run something yourself.
+
+## 👤 Accounts & automatic failover
+
+- `/account add <name>` → choose **🌐 Web login** (the bot gives a login link; sign in on the
+  Freebuff site) or **📋 Paste credentials.json** (if you already have the file).
+- Accounts are stored in `accounts/` (gitignored, permissions `600`). `default` is the server's own
+  account and cannot be deleted.
+- Each account has its **own session and Freebucks**.
+- When the active account's quota is exhausted, the bot **switches to the next account
+  automatically**, starts a fresh session, and tells you:
+  `♻️ Account "X" quota is used up; switching to "Y".`
+  This happens on chat errors, session start and renew.
+
+Only add accounts whose owner has given permission — adding extra accounts may violate Freebuff's
+rules and risks a ban.
+
+## 🔒 Security
+
+- Only the numeric ids in `ALLOWED_USER_IDS` are served; everyone else is ignored silently.
+- `.env`, `state.json`, `accounts/` and secrets are **never** committed (see `.gitignore`).
+- Server tools run as the bot's OS user. Keep the server access list tight.
+
+## 🧩 Troubleshooting / FAQ
+
+- **`free_mode_cli_required`** — the request must include the official system‑prompt prefix; the
+  bot adds it automatically. Update to the latest version if you still see it.
+- **`session_superseded` (409)** — two instances used the same account. The bot always reuses the
+  active session's `instanceId`; avoid running a second client on the same account.
+- **`waiting_room_required` (428)** — the session expired mid‑request. Your next message starts a
+  new one automatically.
+- **Quota exhausted** — Freebucks is a daily budget; the bot shows the reset time. Wait, upgrade,
+  or switch account.
+- **The model says it has no shell** — make sure `ENABLE_SERVER_TOOLS=true` (Settings/install) and
+  that you added a Freebuff account with quota.
+
+## 🏗 Architecture
+
+```
+src/
+├── index.mjs      entry point (loads config, starts the bot)
+├── config.mjs     .env + Freebuff credentials + model→agent map
+├── state.mjs      sessions/history + small global settings
+├── settings.mjs   reads/writes Freebuff's settings.json (mode/ads/model)
+├── instance.mjs   locks & instance handling (avoid takeover)
+├── accounts.mjs   multiple account profiles (Web login / credentials.json)
+├── chat.mjs       session + agent-runs + chat/completions (+ tool support)
+└── bot.mjs        Telegram UI, buttons, agent tools, failover
+```
+
+## 📦 Release
+
 ```bash
 ./release.sh patch "short title" "full description"
 ./release.sh minor "New feature" "…"
 ./release.sh 1.2.3 "Exact version" "…"
 ```
-It bumps the version, updates `CHANGELOG.md`, commits, tags `vX.Y.Z`, pushes, and creates a GitHub Release.
+It bumps the version, updates `CHANGELOG.md`, commits, tags `vX.Y.Z`, pushes, and creates a
+GitHub Release with a short title and the full description in the body.
 
-### License
-MIT
+## Contributing
 
----
-
-## 🇮🇷 فارسی
-
-ربات تلگرامی برای **مدیریت و چت کامل با فری‌باف روی سرور، بدون نیاز به SSH**.
-همه‌چیز از داخل تلگرام — با دکمه‌های شیشه‌ای، کیبورد ثابت پایین، یا متن — انجام می‌شود.
-
-### ✨ قابلیت‌ها
-- 💬 **چت** با مدل‌های رایگان فری‌باف از تلگرام، با چند جلسهٔ گفتگوی مستقل و تاریخچهٔ جدا.
-- 🤖 **مدل‌ها**: سوییچ واقعی (جلسه را می‌بندد و دوباره admission می‌زند)؛ نمایش قیمت هر مدل (باک/ساعت) و سهمیهٔ ساعتی امروز؛ مدل‌های غیرفعال خاکستری و غیرقابل‌انتخاب.
-- 🎛 **نوع پاسخ**: 🧩 پیش‌فرض · ⚡ سریع (Lite) · 🛠 ساخت کامل (Build/MAX) · 🗺 برنامه‌ریزی (Plan).
-- ⚙️ **تنظیمات**: نوع پاسخ، تبلیغات، مدل، هشدار انقضا.
-- 👤 **چند اکانت** (استفادهٔ شریکی): افزودن با **ورود وب** (همان مکانیزم رسمی login، بدون سرور) یا پیست `credentials.json`؛ **سوییچ خودکار** به اکانت بعدی وقتی سهمیه تمام شود.
-- ⏳ **تایمر جلسه**: جلسهٔ رایگان دقیقاً ۱ ساعت (سمت سرور)؛ شمارش زندهٔ زمان، هشدار قبل از انقضا، و دکمهٔ تمدید فقط نزدیک انقضا.
-- 💵 **سهمیه (باک)**: نمایش مانده/استفاده‌شده و سقف تعداد جلسه؛ هنگام اتمام، پیام شفاف با دکمه‌های **افزودن/تغییر اکانت** و **خرید اشتراک**.
-- ⌨️ **کنترل سرور (ابزارهای مدل)**: مدل می‌تواند `run_terminal_command`، `read_file`، `list_directory` و `write_file` اجرا کند؛ دستورهای خطرناک تأیید می‌گیرند.
-- 🎛 **رابط**: دکمه‌های شیشه‌ای + کیبورد ثابت پایین (`📊 وضعیت` · `/start` · `🤖 مدل`) + سوییچ زبان FA/EN.
-- 🔒 **امنیت**: فقط به `ALLOWED_USER_IDS` پاسخ می‌دهد.
-
-### ⚠️ پیش‌نیاز: اول فری‌باف را روی سرور نصب کن
-```bash
-npm i -g freebuff
-freebuff          # login
-```
-سایت: **https://freebuff.com** — بعد از لاگین، فایل `~/.config/manicode/credentials.json` ساخته می‌شود.
-
-### 🚀 نصب (یک‌خطی)
-```bash
-git clone https://github.com/Aknuun/Freebuff-Guardian.git && cd Freebuff-Guardian && bash install.sh
-```
-نصب‌کننده می‌پرسد: توکن ربات ([@BotFather](https://t.me/BotFather))، آیدی عددی ([@userinfobot](https://t.me/userinfobot)) و فعال‌بودن کنترل سرور؛ بعد `.env` می‌سازد، `npm install` می‌زند و در صورت تمایل سرویس systemd نصب می‌کند.
-
-### 💵 سهمیه و باک
-- هر **جلسه** معادل **قیمت ساعتی** مدل است که **یک‌بار** در شروع کم می‌شود؛ هر جلسه **۱ ساعت** است.
-- بودجهٔ روزانه نیمه‌شب **Pacific** پر می‌شود و منتقل نمی‌شود.
-- قیمت‌ها (باک/ساعت): GLM/Kimi=۵ · MiMo/Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini=۵۰.
-- `🎟 سقف تعداد جلسه` یک شمارندهٔ **جدا** است؛ محدودیت اصلی همان باک است.
-- هنگام اتمام: زمان ریست + دکمه‌های **➕ افزودن اکانت**، **🔄 تغییر اکانت**، **🛒 خرید اشتراک**.
-
-### ⏳ جلسه و تایمر
-- TTL ثابت **۱ ساعت** سمت سرور؛ چت آن را تمدید نمی‌کند.
-- هشدار قبل از انقضا (پیش‌فرض ۵ دقیقه، قابل تنظیم) و دکمهٔ تمدید **فقط** در آن زمان.
-- پیام بعدی خودکار جلسهٔ تازه می‌سازد (یا به اکانت دیگری failover می‌کند).
-
-### ⌨️ کنترل سرور (ابزارها)
-- ابزارها: `run_terminal_command`، `read_file`، `list_directory`، `write_file` (تا ۸ گام).
-- در حین کار، پیام بالایی پیشرفت را نشان می‌دهد؛ در پایان به **بلوک وضعیت** (مدل · زمان مانده · سهمیه) تبدیل می‌شود و جواب در پیام **جداگانه** می‌آید.
-- دستورهای **خطرناک** تأیید **اجرا/لغو** می‌گیرند؛ بقیه خودکار.
-- ربات با کاربر سرور (پیش‌فرض root) اجرا می‌شود. فعال/غیرفعال با `ENABLE_SERVER_TOOLS`.
-
-### 👤 اکانت‌ها و failover
-- `/account add <name>` → **🌐 ورود وب** یا **📋 پیست credentials.json**.
-- اکانت‌ها در `accounts/` (خارج از گیت، mode 600)؛ `default` همان حساب سرور است.
-- با تمام‌شدن سهمیهٔ اکانت فعال، ربات **خودکار روی اکانت بعدی** سوییچ می‌کند و پیام می‌دهد.
-
-### 📦 انتشار
-```bash
-./release.sh patch "عنوان کوتاه" "توضیح کامل"
-```
-
----
-
-## 🇷🇺 Русский
-
-Telegram-бот для **полного управления Freebuff и общения с ним на вашем сервере — без SSH**.
-Всё делается из Telegram: inline-кнопки, фиксированная нижняя клавиатура или текст.
-
-### ✨ Возможности
-- 💬 **Чат** с бесплатными моделями Freebuff из Telegram, несколько независимых сессий.
-- 🤖 **Модели**: настоящее переключение (закрывает сессию и заново делает admission); показывается цена (баков/час) и остаток часов; недоступные модели серые и не нажимаются.
-- 🎛 **Режим ответа**: 🧩 По умолчанию · ⚡ Быстрый (Lite) · 🛠 Сборка (MAX) · 🗺 План.
-- ⚙️ **Настройки**: режим, реклама, модель, предупреждение об истечении.
-- 👤 **Несколько аккаунтов**: добавление через **вход в веб** (официальный login-flow, сервер не нужен) или вставкой `credentials.json`; **авто‑переключение** на следующий аккаунт при исчерпании лимита.
-- ⏳ **Таймер сессии**: сессия ровно 1 час (на стороне сервера); отсчёт, предупреждение и кнопка продления только перед истечением.
-- 💵 **Лимит (баки)**: показывается использовано/осталось и счётчик сессий; при исчерпании — понятное сообщение и кнопки **Добавить аккаунт / Сменить аккаунт / Купить план**.
-- ⌨️ **Управление сервером (инструменты модели)**: `run_terminal_command`, `read_file`, `list_directory`, `write_file`. Опасные команды требуют подтверждения.
-- 🎛 **Интерфейс**: inline-кнопки + нижняя клавиатура (`📊 Статус` · `/start` · `🤖 Модель`) + переключатель языка FA/EN.
-- 🔒 **Безопасность**: отвечает только `ALLOWED_USER_IDS`.
-
-### ⚠️ Требование: сначала установите Freebuff на сервер
-```bash
-npm i -g freebuff
-freebuff          # войти
-```
-Сайт: **https://freebuff.com** — после входа создаётся `~/.config/manicode/credentials.json`.
-
-### 🚀 Установка (одна строка)
-```bash
-git clone https://github.com/Aknuun/Freebuff-Guardian.git && cd Freebuff-Guardian && bash install.sh
-```
-Установщик спросит токен бота ([@BotFather](https://t.me/BotFather)), ваш числовой id ([@userinfobot](https://t.me/userinfobot)) и включение управления сервером; затем создаст `.env`, выполнит `npm install` и (по желанию) установит сервис systemd.
-
-### 💵 Лимит и баки
-- Каждая **сессия** стоит **часовую цену** модели в баках, списывается **один раз** при старте; сессия длится **1 час**.
-- Дневной бюджет обновляется в **полночь по Pacific** и не переносится.
-- Цены (баков/час): GLM/Kimi=5 · MiMo/Solar=10 · DeepSeek V4 Flash=15 · Luna=20 · Gemini=50.
-- `🎟 счётчик сессий` (день/7д/месяц) — **отдельный**; главный лимит — баки.
-- При исчерпании: время сброса + кнопки **➕ Добавить аккаунт**, **🔄 Сменить аккаунт**, **🛒 Купить план**.
-
-### ⏳ Сессия и таймер
-- Фиксированный TTL **1 час** на сервере; чат его не продлевает.
-- Предупреждение перед истечением (по умолчанию 5 минут) и кнопка продления **только** тогда.
-- Следующее сообщение автоматически начнёт новую сессию (или переключит аккаунт).
-
-### ⌨️ Управление сервером
-- Инструменты: `run_terminal_command`, `read_file`, `list_directory`, `write_file` (до 8 шагов).
-- Во время работы верхнее сообщение показывает прогресс; в конце становится **блоком статуса** (модель · остаток времени · лимит), а ответ приходит **отдельным** сообщением.
-- **Опасные команды** требуют подтверждения **Запустить/Отмена**; остальные выполняются автоматически.
-- Бот работает от пользователя сервера (по умолчанию root). Вкл/выкл: `ENABLE_SERVER_TOOLS`.
-
-### 👤 Аккаунты и failover
-- `/account add <name>` → **🌐 Вход в веб** или **📋 Вставить credentials.json**.
-- Аккаунты хранятся в `accounts/` (вне git, режим 600); `default` — аккаунт сервера.
-- При исчерпании лимита активного аккаунта бот **автоматически переключается** на следующий и сообщает об этом.
-
-### 📦 Релиз
-```bash
-./release.sh patch "краткий заголовок" "полное описание"
-```
-
----
+Issues and PRs are welcome. Please keep the code style consistent and never commit secrets.
 
 ## License
+
 MIT
