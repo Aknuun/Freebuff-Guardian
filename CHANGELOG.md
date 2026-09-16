@@ -3,6 +3,13 @@
 همهٔ تغییرات مهم این پروژه اینجا ثبت می‌شود. قالب بر اساس [Keep a Changelog](https://keepachangelog.com/fa/1.1.0/)
 و نسخه‌گذاری بر اساس [Semantic Versioning](https://semver.org/).
 
+## [1.24.1] - 2026-09-16
+
+### Changed
+- ترجمهٔ زندهٔ تفکرات مدل به فارسی
+
+  افزودن ترجمهٔ خودکار reasoning به فارسی برای نمایش زنده در پیام وضعیت (با پشتیبانی reasoning_effort و بازگشت به متن اصلی در صورت خطا). قابل خاموش‌کردن با FREEBUFF_TRANSLATE_THOUGHTS=false.
+
 ## [1.24.0] - 2026-09-16
 
 ### Changed
