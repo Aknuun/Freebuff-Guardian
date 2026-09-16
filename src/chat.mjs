@@ -379,7 +379,7 @@ export class FreebuffChat {
    * یک درخواست خام به chat/completions؛ پیام assistant کامل (شامل tool_calls)
    * را برمی‌گرداند تا حلقهٔ ابزار در لایهٔ بالاتر اجرا شود.
    */
-  async rawComplete({ model, messages, tools, maxTokens = 4096, agent, signal, reasoningEffort }, retry = true) {
+  async rawComplete({ model, messages, tools, maxTokens = 4096, agent, signal }, retry = true) {
     if (!this.authToken) throw new Error('احراز هویت فری‌باف تنظیم نشده است');
     if (signal?.aborted) throw abortError();
     // جلسه معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
@@ -402,7 +402,6 @@ export class FreebuffChat {
           model: useModel,
           messages: withCliSystemPrompt(messages),
           max_tokens: maxTokens,
-          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
           codebuff_metadata: {
             run_id: runId,
@@ -427,7 +426,7 @@ export class FreebuffChat {
         log.warn('جلسه منقضی شده بود (428)؛ تمدید و تلاش دوباره');
         // اگر تمدید شکست خورد (مثلاً سهمیه تمام است) همان خطا را نشان بده.
         await this.renewSession(useModel);
-        return this.rawComplete({ model, messages, tools, maxTokens, agent, signal, reasoningEffort }, false);
+        return this.rawComplete({ model, messages, tools, maxTokens, agent, signal }, false);
       }
       const err = new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);
       err.status = res.status;
