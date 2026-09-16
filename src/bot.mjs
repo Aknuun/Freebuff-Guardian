@@ -26,6 +26,7 @@ import { AccountStore } from './accounts.mjs';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const execp = promisify(exec);
 const log = makeLogger('bot');
@@ -1341,24 +1342,29 @@ export class GuardianBot {
   }
 
   // ---------- ابزار اجرای دستور روی سرور (tool-calling) ----------
-  /** تعریف ابزار در دسترس مدل */
+  /** تعریف ابزارهای در دسترس مدل (شبیه CLI فری‌باف) */
   serverTools() {
-    return [{
+    const fn = (name, description, properties, required) => ({
       type: 'function',
-      function: {
-        name: 'run_terminal_command',
-        description: 'Run a shell command on THIS server (the machine hosting the bot) and return stdout+stderr. Use it to inspect files, processes, services, logs, disk, etc.',
-        parameters: {
-          type: 'object',
-          properties: {
-            command: { type: 'string', description: 'Shell command, e.g. "ls -la /root" or "df -h".' },
-            cwd: { type: 'string', description: 'Working directory (optional).' },
-            timeoutSec: { type: 'integer', description: 'Timeout in seconds (default 60).' },
-          },
-          required: ['command'],
-        },
-      },
-    }];
+      function: { name, description, parameters: { type: 'object', properties, required } },
+    });
+    return [
+      fn('run_terminal_command', 'Run a shell command on THIS server (the machine hosting the bot) and return stdout+stderr. Use it to inspect files, processes, services, logs, disk, etc.', {
+        command: { type: 'string', description: 'Shell command, e.g. "ls -la /root" or "df -h".' },
+        cwd: { type: 'string', description: 'Working directory (optional).' },
+        timeoutSec: { type: 'integer', description: 'Timeout in seconds (default 60).' },
+      }, ['command']),
+      fn('read_file', 'Read a text file from the server.', {
+        path: { type: 'string', description: 'Absolute or relative file path.' },
+      }, ['path']),
+      fn('list_directory', 'List entries of a directory on the server.', {
+        path: { type: 'string', description: 'Directory path (default current workdir).' },
+      }, []),
+      fn('write_file', 'Create or overwrite a text file with the given content.', {
+        path: { type: 'string', description: 'File path to write.' },
+        content: { type: 'string', description: 'Full file content.' },
+      }, ['path', 'content']),
+    ];
   }
 
   /** تأیید دستور خطرناک با دکمه */
@@ -1384,53 +1390,113 @@ export class GuardianBot {
     const name = call?.function?.name;
     let args = {};
     try { args = JSON.parse(call?.function?.arguments || '{}'); } catch { /* args نامعتبر */ }
-    if (name !== 'run_terminal_command') return `error: unknown tool ${name}`;
-    const cmd = String(args.command || '').trim();
-    if (!cmd) return 'error: empty command';
-    if (isDangerousCommand(cmd)) {
-      const ok = await this.confirmTool(chatId, userId, cmd);
-      if (!ok) return 'The user declined to run this command. Ask before retrying.';
-    }
-    const cwd = args.cwd || this.cfg.workdir || process.cwd();
-    const timeout = (Number(args.timeoutSec) || this.cfg.cmdTimeoutSec || 60) * 1000;
-    try {
-      const { stdout, stderr } = await execp(cmd, { timeout, maxBuffer: 2e6, cwd });
-      return (`${stdout}${stderr ? `\nSTDERR:\n${stderr}` : ''}`.trim() || '(no output)').slice(0, 6000);
-    } catch (e) {
-      const out = `${e.stdout || ''}${e.stderr ? `\nSTDERR:\n${e.stderr}` : ''}`.trim();
-      return `Command failed (exit ${e.code ?? '?'}): ${out || e.message}`.slice(0, 6000);
+    const wd = this.cfg.workdir || process.cwd();
+    const abs = (p) => path.resolve(wd, String(p || '.'));
+
+    switch (name) {
+      case 'run_terminal_command': {
+        const cmd = String(args.command || '').trim();
+        if (!cmd) return 'error: empty command';
+        if (isDangerousCommand(cmd)) {
+          const ok = await this.confirmTool(chatId, userId, cmd);
+          if (!ok) return 'The user declined to run this command. Ask before retrying.';
+        }
+        const timeout = (Number(args.timeoutSec) || this.cfg.cmdTimeoutSec || 60) * 1000;
+        try {
+          const { stdout, stderr } = await execp(cmd, { timeout, maxBuffer: 2e6, cwd: abs(args.cwd) });
+          return (`${stdout}${stderr ? `\nSTDERR:\n${stderr}` : ''}`.trim() || '(no output)').slice(0, 6000);
+        } catch (e) {
+          const out = `${e.stdout || ''}${e.stderr ? `\nSTDERR:\n${e.stderr}` : ''}`.trim();
+          return `Command failed (exit ${e.code ?? '?'}): ${out || e.message}`.slice(0, 6000);
+        }
+      }
+      case 'read_file': {
+        if (!args.path) return 'error: path required';
+        try {
+          const content = fs.readFileSync(abs(args.path), 'utf8');
+          const max = 20000;
+          return content.length > max ? `${content.slice(0, max)}\n...(truncated, total ${content.length} chars)` : content;
+        } catch (e) { return `error: ${e.message}`; }
+      }
+      case 'list_directory': {
+        try {
+          const entries = fs.readdirSync(abs(args.path || '.'), { withFileTypes: true });
+          if (!entries.length) return '(empty)';
+          return entries.slice(0, 500).map((e) => `${e.isDirectory() ? 'd' : '-'} ${e.name}`).join('\n');
+        } catch (e) { return `error: ${e.message}`; }
+      }
+      case 'write_file': {
+        if (!args.path) return 'error: path required';
+        try {
+          const file = abs(args.path);
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          const content = String(args.content ?? '');
+          fs.writeFileSync(file, content);
+          return `wrote ${file} (${content.length} chars)`;
+        } catch (e) { return `error: ${e.message}`; }
+      }
+      default:
+        return `error: unknown tool ${name}`;
     }
   }
 
-  /** حلقهٔ ابزار: مدل دستور می‌خواهد، ما اجرا می‌کنیم و نتیجه را برمی‌گردانیم */
-  async agentLoop(chatId, userId, messages) {
+  /** حلقهٔ ابزار: مدل فکر و دستور می‌خواهد، ما اجرا می‌کنیم و نتیجه را برمی‌گردانیم */
+  async agentLoop(chatId, userId, messages, onStep) {
     const model = this.settings.getModel();
     const tools = this.serverTools();
     const MAX_STEPS = 8;
+    let thoughts = '';
+    const toolLog = [];
     for (let step = 0; step < MAX_STEPS; step++) {
       const { message } = await this.chat.rawComplete({ model, messages, tools });
+      const reasoning = String(message?.reasoning_content || message?.reasoning || '').trim();
+      if (reasoning) thoughts += (thoughts ? '\n\n' : '') + reasoning;
       const calls = message?.tool_calls;
       if (Array.isArray(calls) && calls.length) {
         messages.push({ role: 'assistant', content: message.content || '', tool_calls: calls });
         for (const call of calls) {
+          let desc = call?.function?.name || 'tool';
+          try {
+            const a = JSON.parse(call?.function?.arguments || '{}');
+            desc = call.function.name === 'run_terminal_command' ? `$ ${a.command}` : `${call.function.name} ${a.path || ''}`.trim();
+          } catch { /* ignore */ }
+          toolLog.push(desc);
+          if (onStep) await onStep({ thoughts, toolLog }).catch(() => {});
           const result = await this.executeTool(chatId, userId, call);
           messages.push({ role: 'tool', tool_call_id: call.id, name: call?.function?.name, content: String(result) });
         }
         continue;
       }
-      return (message?.content || '').toString();
+      return { answer: (message?.content || '').toString(), thoughts, toolLog };
     }
-    return this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)');
+    return { answer: this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)'), thoughts, toolLog };
   }
 
   /** اجرای واقعی چت روی سشن موجود */
+  /** خط سهمیه برای انتهای پاسخ */
+  quotaLine() {
+    const daily = this.chat.lastQuota?.freebucks?.daily;
+    if (!daily) return '';
+    const left = Math.max(0, daily.remaining ?? 0);
+    const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
+    return this.tr(`💵 سهمیه: مانده ${left} از ${daily.limit} Freebucks · استفاده‌شده ${used}`, `💵 Quota: ${left} left of ${daily.limit} Freebucks · used ${used}`);
+  }
+
   async runChat(chatId, userId, name, session, text) {
     this.busy.add(userId);
-    const progress = await this.send(chatId, '🤔 …');
+    const thinking = await this.send(chatId, this.tr('💭 در حال فکر کردن…', '💭 Thinking…'));
+    const thinkingId = thinking.message_id;
+    const renderThoughts = async (thoughts, toolLog) => {
+      const parts = [];
+      if (thoughts) parts.push(thoughts);
+      if (toolLog?.length) parts.push(this.tr('🔧 ابزارها:', '🔧 Tools:') + '\n' + toolLog.map((t) => '• ' + t).join('\n'));
+      const body = parts.join('\n\n') || this.tr('💭 در حال فکر کردن…', '💭 Thinking…');
+      await this.bot.editMessageText(body.slice(0, 3900), { chat_id: chatId, message_id: thinkingId }).catch(() => {});
+    };
     try {
       const history = session.messages.slice(-16);
       const sys = this.cfg.serverTools
-        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزار run_terminal_command داری؛ با آن می‌توانی روی سرور دستور اجرا کنی و خروجی را ببینی. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have the run_terminal_command tool to run commands and see output. Be concise.')
+        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزارهای run_terminal_command، read_file، list_directory و write_file داری و می‌توانی هر کاری روی سرور انجام دهی. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have run_terminal_command, read_file, list_directory and write_file tools and can do anything on the server. Be concise.')
         : this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant. Be concise.');
       const messages = [
         { role: 'system', content: sys },
@@ -1438,21 +1504,30 @@ export class GuardianBot {
         { role: 'user', content: text },
       ];
 
-      const answer = this.cfg.serverTools
-        ? await this.agentLoop(chatId, userId, messages)
-        : await this.chat.complete({ model: this.settings.getModel(), messages });
+      let answer;
+      if (this.cfg.serverTools) {
+        const res = await this.agentLoop(chatId, userId, messages, ({ thoughts, toolLog }) => renderThoughts(thoughts, toolLog));
+        answer = res.answer;
+        if (res.thoughts || res.toolLog.length) await renderThoughts(res.thoughts, res.toolLog);
+        else await this.bot.deleteMessage(chatId, thinkingId).catch(() => {}); // تفکری نبود
+      } else {
+        answer = await this.chat.complete({ model: this.settings.getModel(), messages });
+        await this.bot.deleteMessage(chatId, thinkingId).catch(() => {});
+      }
+
       this.state.pushMessage(userId, name, { role: 'user', content: text });
       this.state.pushMessage(userId, name, { role: 'assistant', content: answer });
 
       const out = answer.length > this.cfg.maxAnswerChars
         ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
         : answer || this.tr('(پاسخ خالی)', '(empty answer)');
-      await this.bot.editMessageText(out, { chat_id: chatId, message_id: progress.message_id });
+      // جواب در پیام جداگانه + وضعیت سهمیه
+      const q = this.quotaLine();
+      await this.send(chatId, q ? `${out}\n\n${q}` : out, { reply_markup: { inline_keyboard: this.statusKeyboard() } });
     } catch (e) {
       log.error('چت ناموفق:', e);
       const hint = this.chatErrorHint(e);
-      // خطا به‌صورت پیام تازه در پایین فرستاده می‌شود (نه ویرایش پیام بالایی).
-      await this.bot.deleteMessage(chatId, progress.message_id).catch(() => {});
+      await this.bot.deleteMessage(chatId, thinkingId).catch(() => {});
       await this.send(chatId, `❌ ${hint.slice(0, 500)}`, { reply_markup: { inline_keyboard: this.statusKeyboard() } }).catch(() => {});
     } finally {
       this.busy.delete(userId);
