@@ -2312,9 +2312,10 @@ export class GuardianBot {
     const controller = new AbortController();
     this.aborters.set(userId, controller);
     const signal = controller.signal;
+    const modelName = this.settings.getModel();
     let status;
     try {
-      status = await this.send(chatId, this.tr('⏱ ۰ ثانیه · 🧠 در حال فکر کردن…', '⏱ 0s · 🧠 Thinking…'), {
+      status = await this.send(chatId, this.tr(`⏱ ۰ ثانیه · 🤖 ${modelName} · 🧠 در حال فکر کردن…`, `⏱ 0s · 🤖 ${modelName} · 🧠 Thinking…`), {
         keep: true, // پیام وضعیت نباید مثل منو با پیام بعدی پاک شود
         reply_markup: { inline_keyboard: [[btn(this.tr('⏹ توقف', '⏹ Stop'), 'runstop', 'danger')]] },
       });
@@ -2342,7 +2343,7 @@ export class GuardianBot {
       rendering = true;
       try {
         const secs = Math.floor((Date.now() - startedAt) / 1000);
-        let body = this.tr(`⏱ ${secs} ثانیه · 🧠 در حال فکر کردن…`, `⏱ ${secs}s · 🧠 Thinking…`);
+        let body = this.tr(`⏱ ${secs} ثانیه · 🤖 ${modelName} · 🧠 در حال فکر کردن…`, `⏱ ${secs}s · 🤖 ${modelName} · 🧠 Thinking…`);
         // اگر مدت زیادی از سرور خبری نرسیده، علت را شفاف بگو
         const idle = Math.floor((Date.now() - lastStepAt) / 1000);
         if (idle >= 90) {
@@ -2371,14 +2372,21 @@ export class GuardianBot {
     };
     const tick = setInterval(() => { renderProgress(); }, 4000);
     tick.unref?.();
-    // نگهبان کل اجرا: اگر اجرا از مهلت تعیین‌شده گذشت، متوقف کن و علت را بگو
+    // نگهبان «بی‌خبری»: اگر تا مهلت تعیین‌شده هیچ پیشرفتی از سرور نرسد، متوقف کن.
+    // با هر پیشرفت (تفکر/گام ابزار) تایمر ریست می‌شود؛ پس اجرای طولانیِ در حال
+    // پیشرفت مثل CLI قطع نمی‌شود و فقط سرور/پروکسیِ واقعاً معلق بسته می‌شود.
     const runTimeoutSec = this.cfg.runTimeoutSec || 300;
-    const watchdog = setTimeout(() => {
-      timedOut = true;
-      log.warn(`اجرا از مهلت ${runTimeoutSec} ثانیه گذشت؛ متوقف می‌شود`);
-      controller.abort();
-    }, runTimeoutSec * 1000);
-    watchdog.unref?.();
+    let watchdog;
+    const armWatchdog = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        timedOut = true;
+        log.warn(`اجرا ${runTimeoutSec} ثانیه بی‌خبر از سرور ماند؛ متوقف می‌شود`);
+        controller.abort();
+      }, runTimeoutSec * 1000);
+      watchdog.unref?.();
+    };
+    armWatchdog();
     try {
       const history = session.messages.slice(-16);
       const sys = this.cfg.serverTools
@@ -2394,6 +2402,7 @@ export class GuardianBot {
       if (this.cfg.serverTools) {
         const res = await this.agentLoop(chatId, userId, messages, ({ thoughts, toolLog }) => {
           lastStepAt = Date.now();
+          armWatchdog();
           lastThoughts = thoughts || '';
           lastToolLog = toolLog || [];
           return renderProgress();
@@ -2423,13 +2432,13 @@ export class GuardianBot {
       await this.send(chatId, out);
       await this.maybeSendRenew(chatId);
     } catch (e) {
-      // نگهبان اجرا: از مهلت گذشت و خودمان متوقف کردیم
+      // نگهبان اجرا: مدت زیادی از سرور خبری نشد و خودمان متوقف کردیم
       if (timedOut) {
-        log.warn('اجرا به‌خاطر مهلت کل متوقف شد');
+        log.warn('اجرا به‌خاطر بی‌خبری طولانی از سرور متوقف شد');
         await this.clearMarkup(chatId, statusId);
         await this.editText(chatId, statusId, this.tr(
-          `⏱ اجرا بیش از ${runTimeoutSec} ثانیه طول کشید و متوقف شد.\nعلت: پاسخ مدل/سرور فری‌باف کند بود یا در حلقهٔ ابزار گیر کرده بود. دوباره بفرست.`,
-          `⏱ The run exceeded ${runTimeoutSec}s and was stopped.\nCause: slow Freebuff model/server or a tool loop. Please resend.`,
+          `⏱ بیش از ${runTimeoutSec} ثانیه هیچ پاسخی از سرور فری‌باف نرسید و اجرا متوقف شد.\nعلت: کندی مدل/سرور یا گیر کردن در حلقهٔ ابزار. دوباره بفرست.`,
+          `⏱ No response from the Freebuff server for over ${runTimeoutSec}s; the run was stopped.\nCause: slow model/server or a stuck tool loop. Please resend.`,
         ));
         return;
       }

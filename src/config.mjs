@@ -107,7 +107,8 @@ export function loadConfig() {
     cmdTimeoutSec: parseInt(process.env.CMD_TIMEOUT_SEC || '60', 10),
     // مهلت هر درخواست HTTP به فری‌باف (ثانیه) تا هیچ درخواستی بی‌نهایت معلق نماند
     httpTimeoutSec: parseInt(process.env.FREEBUFF_HTTP_TIMEOUT_SEC || '180', 10),
-    // مهلت کل یک اجرای چت (ثانیه)؛ بعد از آن متوقف و علت گزارش می‌شود
+    // مهلت «بی‌خبری» یک اجرای چت (ثانیه)؛ اگر تا این مدت هیچ پیشرفتی از سرور
+    // نرسد متوقف می‌شود. با هر پیشرفت ریست می‌شود (نه سقف کل اجرا).
     runTimeoutSec: parseInt(process.env.FREEBUFF_RUN_TIMEOUT_SEC || '300', 10),
     // حداقل فاصله بین ویرایش‌های پیام وضعیت (میلی‌ثانیه) تا به flood تلگرام نخوریم
     minEditMs: parseInt(process.env.FREEBUFF_MIN_EDIT_MS || '3000', 10),
