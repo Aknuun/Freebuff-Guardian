@@ -957,7 +957,16 @@ export class GuardianBot {
       await this.chat.renewSession(model);
       return this.render(chatId, messageId, this.tr(`✅ جلسه \`${model}\` تمدید شد — ⏳ ${humanMs(this.chat.remainingMs())} دیگر`, `✅ Session \`${model}\` renewed — ⏳ ${humanMs(this.chat.remainingMs(), 'en')} left`), this.statusKeyboard());
     } catch (e) {
-      // مثلاً وقتی سهمیه تمام شده، دلیل واقعی + دکمه‌های افزودن اکانت/خرید را نشان بده
+      // سهمیهٔ این اکانت تمام شده؟ خودکار روی اکانت بعدی سوییچ و تمدید کن.
+      if (this.isQuotaError(e)) {
+        const switched = await this.tryFailover(chatId, model);
+        if (switched) {
+          try {
+            await this.chat.renewSession(model);
+            return this.render(chatId, messageId, this.tr(`✅ جلسه روی اکانت «${switched}» تمدید شد — ⏳ ${humanMs(this.chat.remainingMs())} دیگر`, `✅ Session renewed on account "${switched}" — ⏳ ${humanMs(this.chat.remainingMs(), 'en')} left`), this.statusKeyboard());
+          } catch { /* پایین خطا نشان بده */ }
+        }
+      }
       const kb = this.isQuotaError(e) ? this.quotaErrorButtons() : this.statusKeyboard();
       return this.render(chatId, messageId, `❌ ${this.chatErrorHint(e)}`, kb);
     }
@@ -1099,8 +1108,12 @@ export class GuardianBot {
         try {
           await this.chat.renewSession(this.settings.getModel());
         } catch (e) {
-          const kb = this.isQuotaError(e) ? this.quotaErrorButtons() : this.homeKeyboard(u);
-          return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: kb } });
+          // سهمیهٔ این اکانت تمام؟ خودکار برو روی اکانت بعدی
+          const switched = this.isQuotaError(e) ? await this.tryFailover(chatId, this.settings.getModel()) : null;
+          if (!switched) {
+            const kb = this.isQuotaError(e) ? this.quotaErrorButtons() : this.homeKeyboard(u);
+            return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: kb } });
+          }
         }
         const session = this.state.getSession(userId, pend.name) || this.state.ensureSession(userId, pend.name);
         await answer(this.tr('جلسه ساخته شد، در حال ارسال…', 'Session started, sending…'));
@@ -1532,6 +1545,35 @@ export class GuardianBot {
     ];
   }
 
+  /**
+   * وقتی سهمیهٔ اکانت فعلی تمام شد، خودکار روی اکانت بعدی (round-robin) سوییچ
+   * می‌کند و یک جلسهٔ تازه می‌سازد. نام اکانت جدید را برمی‌گرداند یا null.
+   */
+  async tryFailover(chatId, model) {
+    const list = this.accounts.list().map((a) => a.name);
+    const cur = this.activeAccountName();
+    if (list.length < 2) return null;
+    const idx = Math.max(0, list.indexOf(cur));
+    for (let k = 1; k < list.length; k++) {
+      const name = list[(idx + k) % list.length];
+      if (name === cur) continue;
+      this.state.setMeta('activeAccount', name);
+      this.applyActiveAccount();
+      try {
+        await this.chat.renewSession(model);
+        await this.send(chatId, this.tr(
+          `♻️ سهمیهٔ اکانت «${cur}» تمام شده؛ می‌رویم روی اکانت «${name}».`,
+          `♻️ Account "${cur}" quota is used up; switching to "${name}".`,
+        ));
+        return name;
+      } catch { /* این اکانت هم ندارد؛ بعدی */ }
+    }
+    // هیچ اکانتی جا نداشت → برگرد به اکانت قبلی
+    this.state.setMeta('activeAccount', cur);
+    this.applyActiveAccount();
+    return null;
+  }
+
   /** دکمهٔ تمدید فقط وقتی کمتر از مقدار هشدار (پیش‌فرض ۵ دقیقه) تا انقضا مانده */
   renewKeyboardIfNear() {
     if (!this.warnMin || this.warnMin <= 0) return {};
@@ -1540,7 +1582,7 @@ export class GuardianBot {
     return { reply_markup: { inline_keyboard: [[btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')]] } };
   }
 
-  async runChat(chatId, userId, name, session, text) {
+  async runChat(chatId, userId, name, session, text, attempt = 0) {
     this.busy.add(userId);
     const status = await this.send(chatId, this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…'));
     const statusId = status.message_id;
@@ -1586,6 +1628,12 @@ export class GuardianBot {
       await this.send(chatId, out, this.renewKeyboardIfNear());
     } catch (e) {
       log.error('چت ناموفق:', e);
+      // سهمیهٔ این اکانت تمام شده؟ خودکار روی اکانت بعدی برو و یک‌بار دیگر امتحان کن.
+      if (this.isQuotaError(e) && attempt === 0) {
+        await this.bot.deleteMessage(chatId, statusId).catch(() => {});
+        const switched = await this.tryFailover(chatId, this.settings.getModel());
+        if (switched) return this.runChat(chatId, userId, name, session, text, 1);
+      }
       const hint = this.chatErrorHint(e);
       await this.bot.deleteMessage(chatId, statusId).catch(() => {});
       const extra = this.isQuotaError(e)
