@@ -79,8 +79,8 @@ function quotaLines(q, lang = 'fa') {
   const w = q?.freeWindows;
   if (w) {
     lines.push(en
-      ? `🎟 Sessions — today: ${w.dayUsed}/${w.dayLimit} (${Math.max(0, w.dayLimit - w.dayUsed)} left) | week: ${w.weekUsed}/${w.weekLimit} | month: ${w.monthUsed}/${w.monthLimit}`
-      : `🎟 جلسه — امروز: ${w.dayUsed}/${w.dayLimit} (${Math.max(0, w.dayLimit - w.dayUsed)} مانده) | هفته: ${w.weekUsed}/${w.weekLimit} | ماه: ${w.monthUsed}/${w.monthLimit}`);
+      ? `🎟 Session-count cap (separate from Freebucks) — today: ${w.dayUsed}/${w.dayLimit} | 7d: ${w.weekUsed}/${w.weekLimit} | month: ${w.monthUsed}/${w.monthLimit}`
+      : `🎟 سقف تعداد جلسه (جدا از Freebucks) — امروز: ${w.dayUsed}/${w.dayLimit} | ۷روزه: ${w.weekUsed}/${w.weekLimit} | ماهانه: ${w.monthUsed}/${w.monthLimit}`);
   }
   const d = q?.freebucks?.daily;
   if (d) {
@@ -234,7 +234,10 @@ export class GuardianBot {
       } else {
         out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
       }
-      if (w) out.push(this.tr(`   🎟 جلسه مانده — روز ${Math.max(0, w.dayLimit - w.dayUsed)} · هفته ${Math.max(0, w.weekLimit - w.weekUsed)} · ماه ${Math.max(0, w.monthLimit - w.monthUsed)}`, `   🎟 sessions left — day ${Math.max(0, w.dayLimit - w.dayUsed)} · week ${Math.max(0, w.weekLimit - w.weekUsed)} · month ${Math.max(0, w.monthLimit - w.monthUsed)}`));
+      if (w) out.push(this.tr(
+        `   🎟 سقف تعداد جلسه — امروز ${w.dayUsed}/${w.dayLimit} · ۷روزه ${w.weekUsed}/${w.weekLimit} · ماهانه ${w.monthUsed}/${w.monthLimit}`,
+        `   🎟 Session-count cap — today ${w.dayUsed}/${w.dayLimit} · 7d ${w.weekUsed}/${w.weekLimit} · month ${w.monthUsed}/${w.monthLimit}`,
+      ));
       out.push('');
     });
     out.push(this.tr('برای تعویض، روی اکانت بزن.', 'Tap an account to switch.'));
@@ -628,6 +631,7 @@ export class GuardianBot {
         '• اگر همهٔ بودجه روی یک مدل خرج شود: GLM ≈ ۱۴ ساعت · DeepSeek ≈ ۴ ساعت · Luna ≈ ۳ ساعت.',
         '• بودجه هر روز نیمه‌شب Pacific پر می‌شود و منتقل نمی‌شود.',
         '• بعضی مدل‌ها «پریمیوم»‌اند و سقف روزانهٔ جدا (۵ بار) هم دارند.',
+        '• «🎟 سقف تعداد جلسه» یک شمارندهٔ جداگانه است (امروز/۷روزه/ماهانه)؛ محدودیت اصلی همان Freebucks است.',
         '',
         '📊 استفاده‌شده و مانده در «وضعیت» و «👤 اکانت‌ها» نوشته می‌شود.',
       ].join('\n'),
@@ -696,6 +700,7 @@ export class GuardianBot {
         '• Spending it all on one model: GLM ≈ 14h · DeepSeek ≈ 4h · Luna ≈ 3h.',
         '• The budget refills at midnight Pacific and does not carry over.',
         '• Some models are "premium" and also have a separate daily cap (5).',
+        '• "🎟 Session-count cap" is a separate counter (today/7d/month); the main limit is Freebucks.',
         '',
         '📊 Used/left is shown in *Status* and *Accounts*.',
       ].join('\n'),
@@ -1514,7 +1519,10 @@ export class GuardianBot {
   /** دکمه‌های زیر پیام اتمام سهمیه: افزودن اکانت + خرید اشتراک */
   quotaErrorButtons() {
     return [
-      [btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success')],
+      [
+        btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success'),
+        btn(this.tr('🔄 تغییر اکانت', '🔄 Switch account'), 'menu:account', 'primary'),
+      ],
       [{ text: this.tr('🛒 خرید اشتراک پولی', '🛒 Buy a paid plan'), url: 'https://freebuff.com/plans', style: 'primary' }],
     ];
   }
