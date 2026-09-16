@@ -1488,6 +1488,14 @@ export class GuardianBot {
     return lines.join('\n');
   }
 
+  /** دکمهٔ تمدید فقط وقتی کمتر از مقدار هشدار (پیش‌فرض ۵ دقیقه) تا انقضا مانده */
+  renewKeyboardIfNear() {
+    if (!this.warnMin || this.warnMin <= 0) return {};
+    const left = this.chat.remainingMs();
+    if (left == null || left > this.warnMin * 60000) return {};
+    return { reply_markup: { inline_keyboard: [[btn(this.tr('🔄 تمدید سشن', '🔄 Renew session'), 'menu:renew', 'success')]] } };
+  }
+
   async runChat(chatId, userId, name, session, text) {
     this.busy.add(userId);
     const status = await this.send(chatId, this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…'));
@@ -1530,13 +1538,13 @@ export class GuardianBot {
       const out = answer.length > this.cfg.maxAnswerChars
         ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
         : answer || this.tr('(پاسخ خالی)', '(empty answer)');
-      // جواب در پیام جداگانه (بدون سهمیه)
-      await this.send(chatId, out, { reply_markup: { inline_keyboard: this.statusKeyboard() } });
+      // جواب در پیام جداگانه؛ دکمهٔ تمدید فقط اگر نزدیک انقضا باشد
+      await this.send(chatId, out, this.renewKeyboardIfNear());
     } catch (e) {
       log.error('چت ناموفق:', e);
       const hint = this.chatErrorHint(e);
       await this.bot.deleteMessage(chatId, statusId).catch(() => {});
-      await this.send(chatId, `❌ ${hint.slice(0, 500)}`, { reply_markup: { inline_keyboard: this.statusKeyboard() } }).catch(() => {});
+      await this.send(chatId, `❌ ${hint.slice(0, 500)}`, this.renewKeyboardIfNear()).catch(() => {});
     } finally {
       this.busy.delete(userId);
     }
