@@ -3,6 +3,13 @@
 همهٔ تغییرات مهم این پروژه اینجا ثبت می‌شود. قالب بر اساس [Keep a Changelog](https://keepachangelog.com/fa/1.1.0/)
 و نسخه‌گذاری بر اساس [Semantic Versioning](https://semver.org/).
 
+## [1.13.1] - 2026-09-16
+
+### Changed
+- ترجمهٔ Freebucks به باک در ربات
+
+  کلمهٔ Freebucks در همهٔ متن‌های ربات به «باک» تغییر کرد (در حالت انگلیسی: Bucks).
+
 ## [1.13.0] - 2026-09-16
 
 ### Changed

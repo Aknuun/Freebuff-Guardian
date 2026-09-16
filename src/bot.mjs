@@ -79,15 +79,15 @@ function quotaLines(q, lang = 'fa') {
   const w = q?.freeWindows;
   if (w) {
     lines.push(en
-      ? `🎟 Session-count cap (separate from Freebucks) — today: ${w.dayUsed}/${w.dayLimit} | 7d: ${w.weekUsed}/${w.weekLimit} | month: ${w.monthUsed}/${w.monthLimit}`
-      : `🎟 سقف تعداد جلسه (جدا از Freebucks) — امروز: ${w.dayUsed}/${w.dayLimit} | ۷روزه: ${w.weekUsed}/${w.weekLimit} | ماهانه: ${w.monthUsed}/${w.monthLimit}`);
+      ? `🎟 Session-count cap (separate from Bucks) — today: ${w.dayUsed}/${w.dayLimit} | 7d: ${w.weekUsed}/${w.weekLimit} | month: ${w.monthUsed}/${w.monthLimit}`
+      : `🎟 سقف تعداد جلسه (جدا از باک) — امروز: ${w.dayUsed}/${w.dayLimit} | ۷روزه: ${w.weekUsed}/${w.weekLimit} | ماهانه: ${w.monthUsed}/${w.monthLimit}`);
   }
   const d = q?.freebucks?.daily;
   if (d) {
     const used = d.spent ?? Math.max(0, (d.limit ?? 0) - (d.remaining ?? 0));
     lines.push(en
-      ? `💵 Freebucks — left: ${d.remaining}/${d.limit} | used: ${used}`
-      : `💵 Freebucks — مانده: ${d.remaining}/${d.limit} | استفاده‌شده: ${used}`);
+      ? `💵 Bucks — left: ${d.remaining}/${d.limit} | used: ${used}`
+      : `💵 باک — مانده: ${d.remaining}/${d.limit} | استفاده‌شده: ${used}`);
   }
   return lines;
 }
@@ -229,7 +229,7 @@ export class GuardianBot {
       if (daily) {
         const left = Math.max(0, daily.remaining ?? 0);
         const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
-        out.push(this.tr(`   💵 مانده: *${left}* از ${daily.limit} Freebucks · استفاده‌شده: ${used}`, `   💵 Left: *${left}* of ${daily.limit} Freebucks · used: ${used}`));
+        out.push(this.tr(`   💵 مانده: *${left}* از ${daily.limit} باک · استفاده‌شده: ${used}`, `   💵 Left: *${left}* of ${daily.limit} Bucks · used: ${used}`));
         if (price) out.push(this.tr(`   ⏱ یعنی حدود ${Math.floor(left / price)} ساعت با ${model}`, `   ⏱ ~${Math.floor(left / price)}h with ${model}`));
       } else {
         out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
@@ -606,7 +606,7 @@ export class GuardianBot {
 
   helpKeyboard() {
     return [
-      [btn(this.tr('💵 سهمیه و Freebucks', '💵 Quota & Freebucks'), 'help:quota', 'primary')],
+      [btn(this.tr('💵 سهمیه و باک', '💵 Quota & Bucks'), 'help:quota', 'primary')],
       [btn(this.tr('⏳ جلسه و تایمر', '⏳ Session & timer'), 'help:session', 'primary')],
       [btn(this.tr('🤖 مدل‌ها', '🤖 Models'), 'help:model', 'primary')],
       [btn(this.tr('👤 اکانت‌ها', '👤 Accounts'), 'help:account', 'primary')],
@@ -623,15 +623,15 @@ export class GuardianBot {
   helpSectionText(section) {
     const fa = {
       quota: [
-        '💵 *سهمیه و Freebucks*',
+        '💵 *سهمیه و باک*',
         '',
-        'فری‌باف هر روز یک بودجهٔ «Freebucks» می‌دهد که بین همهٔ مدل‌ها مشترک است.',
-        '• هر جلسه، هنگام شروع، معادل قیمت ساعتی مدل از Freebucks کم می‌کند (یک‌بار، نه هر پیام).',
-        '• قیمت‌ها (Freebucks برای هر ساعت): GLM=۵ · Kimi=۵ · MiMo=۱۰ · Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini=۵۰',
+        'فری‌باف هر روز یک بودجهٔ «باک» می‌دهد که بین همهٔ مدل‌ها مشترک است.',
+        '• هر جلسه، هنگام شروع، معادل قیمت ساعتی مدل از باک کم می‌کند (یک‌بار، نه هر پیام).',
+        '• قیمت‌ها (باک برای هر ساعت): GLM=۵ · Kimi=۵ · MiMo=۱۰ · Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini=۵۰',
         '• اگر همهٔ بودجه روی یک مدل خرج شود: GLM ≈ ۱۴ ساعت · DeepSeek ≈ ۴ ساعت · Luna ≈ ۳ ساعت.',
         '• بودجه هر روز نیمه‌شب Pacific پر می‌شود و منتقل نمی‌شود.',
         '• بعضی مدل‌ها «پریمیوم»‌اند و سقف روزانهٔ جدا (۵ بار) هم دارند.',
-        '• «🎟 سقف تعداد جلسه» یک شمارندهٔ جداگانه است (امروز/۷روزه/ماهانه)؛ محدودیت اصلی همان Freebucks است.',
+        '• «🎟 سقف تعداد جلسه» یک شمارندهٔ جداگانه است (امروز/۷روزه/ماهانه)؛ محدودیت اصلی همان باک است.',
         '',
         '📊 استفاده‌شده و مانده در «وضعیت» و «👤 اکانت‌ها» نوشته می‌شود.',
       ].join('\n'),
@@ -648,7 +648,7 @@ export class GuardianBot {
         '🤖 *مدل‌ها*',
         '',
         'از «🤖 مدل» مدل را عوض کن؛ agent هماهنگ خودکار انتخاب می‌شود.',
-        'کنار هر مدل قیمت (Freebucks/ساعت) و سهمیهٔ ساعتی امروز با آن مدل نوشته شده.',
+        'کنار هر مدل قیمت (باک/ساعت) و سهمیهٔ ساعتی امروز با آن مدل نوشته شده.',
         '• ارزان‌ترین: GLM 5.3 Flash · Kimi (۵ FB/ساعت)',
         '• متوسط: MiMo 2.5 · Solar Pro 4 (۱۰)',
         '• گران‌تر: DeepSeek V4 Flash (۱۵) · Luna (۲۰) · Gemini (۵۰)',
@@ -662,7 +662,7 @@ export class GuardianBot {
         '• «📋 پیست credentials.json» — اگر فایل را داری.',
         '• «✏️ با نام دلخواه» — قبلش اسم بده.',
         '',
-        'هر اکانت جلسه و Freebucks مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
+        'هر اکانت جلسه و باک مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
       ].join('\n'),
       chat: [
         '💬 *چت و جلسه‌ها*',
@@ -692,15 +692,15 @@ export class GuardianBot {
     };
     const en = {
       quota: [
-        '💵 *Quota & Freebucks*',
+        '💵 *Quota & Bucks*',
         '',
-        'Freebuff gives a daily Freebucks budget shared across all models.',
+        'Freebuff gives a daily Bucks budget shared across all models.',
         '• Starting a session charges the model\'s hourly price once (not per message).',
-        '• Prices (Freebucks/hour): GLM=5 · Kimi=5 · MiMo=10 · Solar=10 · DeepSeek V4 Flash=15 · Luna=20 · Gemini=50',
+        '• Prices (Bucks/hour): GLM=5 · Kimi=5 · MiMo=10 · Solar=10 · DeepSeek V4 Flash=15 · Luna=20 · Gemini=50',
         '• Spending it all on one model: GLM ≈ 14h · DeepSeek ≈ 4h · Luna ≈ 3h.',
         '• The budget refills at midnight Pacific and does not carry over.',
         '• Some models are "premium" and also have a separate daily cap (5).',
-        '• "🎟 Session-count cap" is a separate counter (today/7d/month); the main limit is Freebucks.',
+        '• "🎟 Session-count cap" is a separate counter (today/7d/month); the main limit is Bucks.',
         '',
         '📊 Used/left is shown in *Status* and *Accounts*.',
       ].join('\n'),
@@ -717,7 +717,7 @@ export class GuardianBot {
         '🤖 *Models*',
         '',
         'Switch model from "🤖 Model"; the matching agent is picked automatically.',
-        'Each model shows its price (Freebucks/hour) and today\'s hours left with it.',
+        'Each model shows its price (Bucks/hour) and today\'s hours left with it.',
         '• Cheapest: GLM 5.3 Flash · Kimi (5 FB/h)',
         '• Mid: MiMo 2.5 · Solar Pro 4 (10)',
         '• Pricier: DeepSeek V4 Flash (15) · Luna (20) · Gemini (50)',
@@ -731,7 +731,7 @@ export class GuardianBot {
         '• "📋 Paste credentials.json" — if you have the file.',
         '• "✏️ Custom name" — set a name first.',
         '',
-        'Each account has its own session and Freebucks; tap it to activate.',
+        'Each account has its own session and Bucks; tap it to activate.',
       ].join('\n'),
       chat: [
         '💬 *Chat & sessions*',
@@ -801,7 +801,7 @@ export class GuardianBot {
     return this.tr(fa, en);
   }
 
-  /** هشدار اتمام سهمیه (اگر Freebucks امروز صفر باشد) */
+  /** هشدار اتمام سهمیه (اگر باک امروز صفر باشد) */
   quotaExhaustedNote() {
     const daily = this.chat.lastQuota?.freebucks?.daily;
     if (!daily || daily.remaining > 0) return '';
@@ -809,16 +809,16 @@ export class GuardianBot {
     const resetFa = ms > 0 ? `؛ ریست تا ${humanMs(ms, 'fa')} دیگر` : '';
     const resetEn = ms > 0 ? `; resets in ${humanMs(ms, 'en')}` : '';
     return this.tr(
-      `🚫 سهمیهٔ Freebucks امروز تمام شده${resetFa}.\nمی‌توانی پلن را ارتقا بدهی: https://freebuff.com/plans`,
-      `🚫 Daily Freebucks are used up${resetEn}.\nYou can upgrade: https://freebuff.com/plans`,
+      `🚫 سهمیهٔ باک امروز تمام شده${resetFa}.\nمی‌توانی پلن را ارتقا بدهی: https://freebuff.com/plans`,
+      `🚫 Daily Bucks are used up${resetEn}.\nYou can upgrade: https://freebuff.com/plans`,
     );
   }
 
   modelText() {
     const cur = this.settings.getModel();
     const base = this.tr(
-      `🤖 *مدل‌های رایگان*\nفعلی: \`${cur}\`\nجلو هر مدل مصرفش (Freebucks/ساعت · سهمیهٔ ساعتی امروز) نوشته شده.\n🟩 فعلی · 🟦 قابل انتخاب · ⬜ غیرفعال (فعلاً در دسترس نیست)`,
-      `🤖 *Free models*\nCurrent: \`${cur}\`\nEach model shows its cost (Freebucks/hour · today's hours left).\n🟩 current · 🟦 selectable · ⬜ disabled (unavailable)`,
+      `🤖 *مدل‌های رایگان*\nفعلی: \`${cur}\`\nجلو هر مدل مصرفش (باک/ساعت · سهمیهٔ ساعتی امروز) نوشته شده.\n🟩 فعلی · 🟦 قابل انتخاب · ⬜ غیرفعال (فعلاً در دسترس نیست)`,
+      `🤖 *Free models*\nCurrent: \`${cur}\`\nEach model shows its cost (Bucks/hour · today's hours left).\n🟩 current · 🟦 selectable · ⬜ disabled (unavailable)`,
     );
     // هشدار سهمیه در پایین متن (نه بالا)
     const note = this.quotaExhaustedNote();
@@ -1276,20 +1276,20 @@ export class GuardianBot {
       const when = ms ? humanMs(ms, this.lang()) : '';
       return this.tr(
         [
-          `🚫 سهمیهٔ Freebucks امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.`,
+          `🚫 سهمیهٔ باک امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.`,
           '',
           '⚠️ افزودن اکانت جدید ریسک دارد و می‌تواند نقض قوانین فری‌باف باشد (احتمال بن‌شدن اکانت).',
           '🛒 یا پلن پولی بگیر: https://freebuff.com/plans',
-          '• Starter — ۸ دلار/ماه (ماه اول ۵ دلار) · ۱۵۰ Freebucks روزانه · ۳ جلسه/روز · ۳۰/ماه',
+          '• Starter — ۸ دلار/ماه (ماه اول ۵ دلار) · ۱۵۰ باک روزانه · ۳ جلسه/روز · ۳۰/ماه',
           '• Plus — ۲۵ دلار/ماه (ماه اول ۱۹) · ۷ جلسه/روز · ۱۰۰/ماه',
           '• Pro — ۶۰ دلار/ماه (ماه اول ۴۵) · ۱۱ جلسه/روز · ۲۱۰/ماه',
         ].join('\n'),
         [
-          `🚫 Your daily Freebucks are used up${when ? `; resets in ${when}` : ''}.`,
+          `🚫 Your daily Bucks are used up${when ? `; resets in ${when}` : ''}.`,
           '',
           '⚠️ Adding another account is risky and may violate Freebuff rules (account ban possible).',
           '🛒 Or get a paid plan: https://freebuff.com/plans',
-          '• Starter — $8/mo (first $5) · 150 Freebucks/day · 3 sessions/day · 30/mo',
+          '• Starter — $8/mo (first $5) · 150 Bucks/day · 3 sessions/day · 30/mo',
           '• Plus — $25/mo (first $19) · 7 sessions/day · 100/mo',
           '• Pro — $60/mo (first $45) · 11 sessions/day · 210/mo',
         ].join('\n'),
@@ -1340,8 +1340,8 @@ export class GuardianBot {
     if (!active) {
       this.pendingChat.set(userId, { chatId, text, name });
       return this.send(chatId, this.tr(
-        '🚫 فعلاً هیچ جلسه فری‌بافی باز نیست.\nاگر بفرستی، یک جلسه تازه ساخته می‌شود و از Freebucks امروزت کم می‌کند.',
-        '🚫 No freebuff session is currently open.\nIf you continue, a new session will start and use your daily Freebucks.',
+        '🚫 فعلاً هیچ جلسه فری‌بافی باز نیست.\nاگر بفرستی، یک جلسه تازه ساخته می‌شود و از باک امروزت کم می‌کند.',
+        '🚫 No freebuff session is currently open.\nIf you continue, a new session will start and use your daily Bucks.',
       ), {
         reply_markup: {
           inline_keyboard: [
