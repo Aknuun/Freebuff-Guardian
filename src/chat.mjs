@@ -116,6 +116,16 @@ export class FreebuffChat {
     return this.quotaByAccount[name] ?? null;
   }
 
+  /** IP خروجی فعلی؛ proxy=null برای اتصال مستقیم، undefined برای پروکسی اکانت فعال */
+  async exitIp(proxy) {
+    const res = await this.req('https://api.ipify.org?format=json', {}, proxy);
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
+    const ip = JSON.parse(text)?.ip;
+    if (!ip) throw new Error('پاسخ نامعتبر از سرویس IP');
+    return ip;
+  }
+
   headers(extra = {}) {
     return {
       Authorization: `Bearer ${this.authToken}`,

@@ -171,6 +171,8 @@ own **proxy** so its requests leave from a different IP:
   its file and included in backups.
 - For the `default` account set the `FREEBUFF_PROXY` variable in `.env`.
 - **Only HTTP/HTTPS proxies work** (e.g. `http://1.2.3.4:8080` or `http://user:pass@1.2.3.4:8080`).
+- After setting it, the **"🧪 Test proxy"** button shows the direct and proxied exit IP so you can
+  confirm the IP actually changed.
 - ❌ `t.me/proxy?...` links (MTProto) are Telegram-only and will NOT work.
 - ❌ Plain SOCKS is not enough; if your client only exposes SOCKS, enable an **HTTP** inbound too
   (xray/v2ray/sing-box) and use e.g. `http://127.0.0.1:8080`. Give each account its own inbound/proxy.

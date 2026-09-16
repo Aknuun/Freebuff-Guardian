@@ -501,6 +501,7 @@ export class GuardianBot {
       btn(this.tr('🗑 حذف اکانت', '🗑 Delete account'), 'accdel', 'danger'),
     ]);
     rows.push([btn(this.tr('🌐 پروکسی اکانت (ضد بن با تشخیص IP فری‌باف)', '🌐 Account proxy (anti-ban by Freebuff IP detection)'), 'acc:proxy', 'primary')]);
+    rows.push([btn(this.tr('🧪 تست پروکسی', '🧪 Test proxy'), 'acctest', 'primary')]);
     rows.push([
       btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
       btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
@@ -1556,8 +1557,8 @@ export class GuardianBot {
           if (!a) { await answer(this.tr('اکانتی نیست', 'No account')); return home(); }
           this.pendingProxy.add(userId);
           return this.render(chatId, messageId, this.tr(
-            `🌐 *پروکسی اکانت «${a.name}»* (ضد بن با تشخیص IP فری‌باف)\nپروکسی فعلی: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nفقط پروکسی *HTTP/HTTPS* کار می‌کند؛ آدرسش را بفرست، مثلاً:\n\`http://1.2.3.4:8080\`\n\`http://user:pass@1.2.3.4:8080\`\n\n❌ لینک‌های \`t.me/proxy?...\` (MTProto) فقط برای خود تلگرام‌اند و کار نمی‌کنند.\n❌ SOCKS به‌تنهایی کار نمی‌کند؛ اگر کلاینتت SOCKS دارد، یک inbound HTTP هم روشن کن (مثلاً xray/v2ray روی \`127.0.0.1:8080\`) و همان را بده.\n\nبرای حذف پروکسی بنویس \`off\`.`,
-            `🌐 *Proxy for account "${a.name}"* (anti-ban by Freebuff IP detection)\nCurrent: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nOnly *HTTP/HTTPS* proxies work; send its URL, e.g.:\n\`http://1.2.3.4:8080\`\n\`http://user:pass@1.2.3.4:8080\`\n\n❌ \`t.me/proxy?...\` links (MTProto) are Telegram-only and won't work.\n❌ Plain SOCKS won't work; if your client only has SOCKS, enable an HTTP inbound too (e.g. xray/v2ray on \`127.0.0.1:8080\`) and use that.\n\nSend \`off\` to remove the proxy.`,
+            `🌐 *پروکسی اکانت «${a.name}»* (ضد بن با تشخیص IP فری‌باف)\nپروکسی فعلی: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nفقط پروکسی *HTTP/HTTPS* کار می‌کند؛ آدرسش را بفرست، مثلاً:\n\`http://1.2.3.4:8080\`\n\`http://user:pass@1.2.3.4:8080\`\n\n❌ لینک‌های \`t.me/proxy?...\` (MTProto) فقط برای خود تلگرام‌اند و کار نمی‌کنند.\n❌ SOCKS به‌تنهایی کار نمی‌کند؛ اگر کلاینتت SOCKS دارد، یک inbound HTTP هم روشن کن (مثلاً xray/v2ray روی \`127.0.0.1:8080\`) و همان را بده.\n\nبرای حذف پروکسی بنویس \`off\`. بعد از تنظیم، «🧪 تست پروکسی» را بزن.`,
+            `🌐 *Proxy for account "${a.name}"* (anti-ban by Freebuff IP detection)\nCurrent: ${a.proxy ? `\`${a.proxy}\`` : '—'}\n\nOnly *HTTP/HTTPS* proxies work; send its URL, e.g.:\n\`http://1.2.3.4:8080\`\n\`http://user:pass@1.2.3.4:8080\`\n\n❌ \`t.me/proxy?...\` links (MTProto) are Telegram-only and won't work.\n❌ Plain SOCKS won't work; if your client only has SOCKS, enable an HTTP inbound too (e.g. xray/v2ray on \`127.0.0.1:8080\`) and use that.\n\nSend \`off\` to remove the proxy. Afterwards tap "🧪 Test proxy".`,
           ), [
             [btn(this.tr('❌ انصراف', '❌ Cancel'), 'menu:account')],
           ]);
@@ -1586,6 +1587,30 @@ export class GuardianBot {
           }
         }
         return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+      }
+
+      case 'acctest': {
+        const a = this.effectiveAccount(this.activeAccount());
+        if (!a) { await answer(this.tr('اکانتی نیست', 'No account')); return home(); }
+        await this.bot.editMessageText(this.tr('🧪 در حال تست پروکسی…', '🧪 Testing proxy…'), { chat_id: chatId, message_id: messageId }).catch(() => {});
+        const direct = await this.chat.exitIp(null).catch((e) => this.tr(`خطا: ${e.message}`, `error: ${e.message}`));
+        let proxied = null;
+        if (a.proxy) proxied = await this.chat.exitIp(a.proxy).catch((e) => this.tr(`خطا: ${e.message}`, `error: ${e.message}`));
+        const ok = a.proxy && proxied && !/^(خطا|error)/.test(String(proxied)) && proxied !== direct;
+        const lines = [
+          this.tr('🧪 *تست پروکسی*', '🧪 *Proxy test*'),
+          this.tr(`اکانت: \`${a.name}\``, `Account: \`${a.name}\``),
+          this.tr(`IP مستقیم (بدون پروکسی): \`${direct}\``, `Direct IP (no proxy): \`${direct}\``),
+        ];
+        if (!a.proxy) {
+          lines.push(this.tr('🌐 پروکسی تنظیم نشده.', '🌐 No proxy configured.'));
+        } else {
+          lines.push(this.tr(`🌐 IP از طریق پروکسی: \`${proxied}\``, `🌐 IP via proxy: \`${proxied}\``));
+          lines.push(ok
+            ? this.tr('✅ پروکسی کار می‌کند و IP عوض شده.', '✅ The proxy works and the IP changed.')
+            : this.tr('⚠️ پروکسی کار نکرد یا IP عوض نشد.', '⚠️ The proxy failed or the IP did not change.'));
+        }
+        return this.render(chatId, messageId, lines.join('\n'), this.accountKeyboard());
       }
 
       case 'accdel': {
