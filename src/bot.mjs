@@ -2326,8 +2326,10 @@ export class GuardianBot {
           );
         }
         if (lastThoughts) {
-          const t = lastThoughts.length > 3200 ? '…\n' + lastThoughts.slice(-3200) : lastThoughts;
-          body += '\n\n' + t;
+          // فقط ۸ خط آخر تفکرات نمایش داده شود؛ خطوط جدید جای قبلی‌ها را می‌گیرند
+          const lines = lastThoughts.split('\n').filter((l) => l.trim() !== '');
+          const tail = lines.slice(-8).join('\n');
+          if (tail) body += '\n\n' + tail.slice(-1500);
         }
         if (lastToolLog.length) {
           body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
