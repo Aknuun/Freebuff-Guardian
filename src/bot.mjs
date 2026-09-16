@@ -1473,25 +1473,30 @@ export class GuardianBot {
   }
 
   /** اجرای واقعی چت روی سشن موجود */
-  /** خط سهمیه برای انتهای پاسخ */
-  quotaLine() {
+  /** متن وضعیت: مدل + زمان مانده + سهمیه (برای پیام بالایی) */
+  statusBlock() {
+    const model = this.settings.getModel();
+    const left = this.chat.remainingMs();
     const daily = this.chat.lastQuota?.freebucks?.daily;
-    if (!daily) return '';
-    const left = Math.max(0, daily.remaining ?? 0);
-    const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
-    return this.tr(`💵 سهمیه: مانده ${left} از ${daily.limit} Freebucks · استفاده‌شده ${used}`, `💵 Quota: ${left} left of ${daily.limit} Freebucks · used ${used}`);
+    const lines = [this.tr(`🤖 مدل: \`${model}\``, `🤖 Model: \`${model}\``)];
+    if (left != null) lines.push(this.tr(`⏳ سشن: ${humanMs(left)} مانده`, `⏳ Session: ${humanMs(left, 'en')} left`));
+    if (daily) {
+      const l = Math.max(0, daily.remaining ?? 0);
+      const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - l);
+      lines.push(this.tr(`💵 سهمیه: مانده ${l} از ${daily.limit} · استفاده‌شده ${used}`, `💵 Quota: ${l} left of ${daily.limit} · used ${used}`));
+    }
+    return lines.join('\n');
   }
 
   async runChat(chatId, userId, name, session, text) {
     this.busy.add(userId);
-    const thinking = await this.send(chatId, this.tr('💭 در حال فکر کردن…', '💭 Thinking…'));
-    const thinkingId = thinking.message_id;
-    const renderThoughts = async (thoughts, toolLog) => {
-      const parts = [];
-      if (thoughts) parts.push(thoughts);
-      if (toolLog?.length) parts.push(this.tr('🔧 ابزارها:', '🔧 Tools:') + '\n' + toolLog.map((t) => '• ' + t).join('\n'));
-      const body = parts.join('\n\n') || this.tr('💭 در حال فکر کردن…', '💭 Thinking…');
-      await this.bot.editMessageText(body.slice(0, 3900), { chat_id: chatId, message_id: thinkingId }).catch(() => {});
+    const status = await this.send(chatId, this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…'));
+    const statusId = status.message_id;
+    const renderProgress = async (toolLog) => {
+      const body = toolLog?.length
+        ? this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + toolLog.map((t) => '• ' + t).join('\n')
+        : this.tr('⏳ در حال فکر کردن…', '⏳ Thinking…');
+      await this.bot.editMessageText(body.slice(0, 3900), { chat_id: chatId, message_id: statusId }).catch(() => {});
     };
     try {
       const history = session.messages.slice(-16);
@@ -1506,28 +1511,31 @@ export class GuardianBot {
 
       let answer;
       if (this.cfg.serverTools) {
-        const res = await this.agentLoop(chatId, userId, messages, ({ thoughts, toolLog }) => renderThoughts(thoughts, toolLog));
+        const res = await this.agentLoop(chatId, userId, messages, ({ toolLog }) => renderProgress(toolLog));
         answer = res.answer;
-        if (res.thoughts || res.toolLog.length) await renderThoughts(res.thoughts, res.toolLog);
-        else await this.bot.deleteMessage(chatId, thinkingId).catch(() => {}); // تفکری نبود
       } else {
         answer = await this.chat.complete({ model: this.settings.getModel(), messages });
-        await this.bot.deleteMessage(chatId, thinkingId).catch(() => {});
       }
 
       this.state.pushMessage(userId, name, { role: 'user', content: text });
       this.state.pushMessage(userId, name, { role: 'assistant', content: answer });
 
+      // پیام بالایی = وضعیت (مدل/زمان مانده/سهمیه) به‌جای تفکرات
+      await this.bot.editMessageText(this.statusBlock(), {
+        chat_id: chatId, message_id: statusId, parse_mode: 'Markdown',
+      }).catch(async () => {
+        await this.bot.editMessageText(this.statusBlock().replace(/[*_`]/g, ''), { chat_id: chatId, message_id: statusId }).catch(() => {});
+      });
+
       const out = answer.length > this.cfg.maxAnswerChars
         ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
         : answer || this.tr('(پاسخ خالی)', '(empty answer)');
-      // جواب در پیام جداگانه + وضعیت سهمیه
-      const q = this.quotaLine();
-      await this.send(chatId, q ? `${out}\n\n${q}` : out, { reply_markup: { inline_keyboard: this.statusKeyboard() } });
+      // جواب در پیام جداگانه (بدون سهمیه)
+      await this.send(chatId, out, { reply_markup: { inline_keyboard: this.statusKeyboard() } });
     } catch (e) {
       log.error('چت ناموفق:', e);
       const hint = this.chatErrorHint(e);
-      await this.bot.deleteMessage(chatId, thinkingId).catch(() => {});
+      await this.bot.deleteMessage(chatId, statusId).catch(() => {});
       await this.send(chatId, `❌ ${hint.slice(0, 500)}`, { reply_markup: { inline_keyboard: this.statusKeyboard() } }).catch(() => {});
     } finally {
       this.busy.delete(userId);
