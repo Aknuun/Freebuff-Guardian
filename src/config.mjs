@@ -93,6 +93,9 @@ export function loadConfig() {
     accountsDir: process.env.FREEBUFF_ACCOUNTS_DIR || path.join(process.cwd(), 'accounts'),
     fbDefaultLabel: fbUser?.name || fbUser?.email || 'default',
     websiteUrl: process.env.FREEBUFF_WEBSITE_URL || 'https://www.codebuff.com',
+    // کنترل سرور توسط مدل (اجرای دستور با تأیید فقط برای دستورهای خطرناک)
+    serverTools: process.env.ENABLE_SERVER_TOOLS !== 'false',
+    workdir: process.env.FREEBUFF_WORKDIR || '',
     // محدودیت‌ها
     maxAnswerChars: parseInt(process.env.MAX_ANSWER_CHARS || '3500', 10),
     cmdTimeoutSec: parseInt(process.env.CMD_TIMEOUT_SEC || '60', 10),

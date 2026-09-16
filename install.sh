@@ -81,6 +81,23 @@ set_kv() {
 set_kv TELEGRAM_BOT_TOKEN "$TOKEN"
 set_kv ALLOWED_USER_IDS "$USER_IDS"
 set_kv STATE_FILE "$DIR/state.json"
+set_kv FREEBUFF_WORKDIR "$DIR"
+
+# کنترل سرور توسط مدل (اجرای دستور با run_terminal_command)
+echo
+echo "کنترل سرور: اگر فعال باشد، مدل می‌تواند روی همین سرور دستور اجرا کند"
+echo "(دستورهای خطرناک قبل از اجرا از تو تأیید می‌گیرند)."
+SERVTOOLS="${ENABLE_SERVER_TOOLS:-}"
+if [[ -z "$SERVTOOLS" ]]; then
+  read -rp "فعال باشد؟ [Y/n] " SERVTOOLS || true
+fi
+if [[ "${SERVTOOLS,,}" == "n" ]]; then
+  set_kv ENABLE_SERVER_TOOLS false
+  echo "  → غیرفعال."
+else
+  set_kv ENABLE_SERVER_TOOLS true
+  echo "  → فعال."
+fi
 ok "فایل .env ساخته/به‌روزرسانی شد."
 
 # ── ۵) نصب وابستگی‌ها ────────────────────────────────────────────

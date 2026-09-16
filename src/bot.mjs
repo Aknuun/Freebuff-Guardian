@@ -36,6 +36,28 @@ const REPLY_ACTIONS = {
   '🤖 مدل': 'model', '🤖 Model': 'model',
 };
 
+// دستورهای خطرناک که قبل از اجرا باید تأیید کاربر را بگیرند
+const DANGEROUS_CMD = [
+  /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/i,
+  /\bmkfs(\.\w+)?\b/i,
+  /\bdd\s+if=/i,
+  /\b(shutdown|reboot|poweroff|halt)\b/i,
+  />\s*\/dev\/[sh]d/i,
+  /\bchmod\s+-R\s+777\s+\//i,
+  /\biptables\s+-F\b/i,
+  /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash)\b/i,
+  /\bkill\s+-9\s+-1\b/i,
+  /\bmv\s+\/(\s|$)/i,
+  /\b:\(\)\s*\{/,
+  /\btruncate\s+-s\s*0\b/i,
+  /\buserdel\b/i,
+  />>?\s*\/etc\/(passwd|shadow)\b/i,
+];
+
+function isDangerousCommand(cmd) {
+  return DANGEROUS_CMD.some((re) => re.test(cmd));
+}
+
 /** ساخت دکمه با رنگ اختیاری (style: primary=آبی، success=سبز، danger=قرمز) */
 function btn(text, callback_data, style) {
   const b = { text, callback_data };
@@ -104,6 +126,7 @@ export class GuardianBot {
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
     this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت سشن است { chatId, text, name }
     this.pendingSh = new Set(); // userId → منتظر دستور شل هستیم
+    this.pendingConfirm = new Map(); // id → resolve برای تأیید دستور خطرناک
     this.chat = new FreebuffChat({
       authToken: cfg.fbAuthToken,
       websiteUrl: cfg.websiteUrl,
@@ -1044,6 +1067,14 @@ export class GuardianBot {
         return this.render(chatId, messageId, this.tr('📢 *تبلیغات*', '📢 *Ads*'), this.adsKeyboard());
       }
 
+      case 'toolok':
+      case 'toolno': {
+        const resolve = this.pendingConfirm.get(value);
+        if (resolve) { this.pendingConfirm.delete(value); resolve(String(q.data).startsWith('toolok')); }
+        await answer(String(q.data).startsWith('toolok') ? this.tr('در حال اجرا…', 'Running…') : this.tr('لغو شد', 'Cancelled'));
+        return;
+      }
+
       case 'chatNew': {
         const pend = this.pendingChat.get(userId);
         this.pendingChat.delete(userId);
@@ -1309,19 +1340,107 @@ export class GuardianBot {
     }
   }
 
+  // ---------- ابزار اجرای دستور روی سرور (tool-calling) ----------
+  /** تعریف ابزار در دسترس مدل */
+  serverTools() {
+    return [{
+      type: 'function',
+      function: {
+        name: 'run_terminal_command',
+        description: 'Run a shell command on THIS server (the machine hosting the bot) and return stdout+stderr. Use it to inspect files, processes, services, logs, disk, etc.',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'Shell command, e.g. "ls -la /root" or "df -h".' },
+            cwd: { type: 'string', description: 'Working directory (optional).' },
+            timeoutSec: { type: 'integer', description: 'Timeout in seconds (default 60).' },
+          },
+          required: ['command'],
+        },
+      },
+    }];
+  }
+
+  /** تأیید دستور خطرناک با دکمه */
+  confirmTool(chatId, userId, command) {
+    return new Promise((resolve) => {
+      const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      this.pendingConfirm.set(id, resolve);
+      const kb = { reply_markup: { inline_keyboard: [[
+        btn(this.tr('✅ اجرا کن', '✅ Run'), `toolok:${id}`, 'success'),
+        btn(this.tr('❌ لغو', '❌ Cancel'), `toolno:${id}`, 'danger'),
+      ]] } };
+      this.send(chatId, this.tr(
+        `⚠️ *دستور خطرناک*\n\`${command.slice(0, 300)}\`\n\nاجرا شود؟`,
+        `⚠️ *Dangerous command*\n\`${command.slice(0, 300)}\`\n\nRun it?`,
+      ), kb).catch(() => {});
+      const t = setTimeout(() => { if (this.pendingConfirm.delete(id)) resolve(false); }, 120000);
+      t.unref?.();
+    });
+  }
+
+  /** اجرای ابزار درخواستی مدل و برگرداندن نتیجه به‌صورت متن */
+  async executeTool(chatId, userId, call) {
+    const name = call?.function?.name;
+    let args = {};
+    try { args = JSON.parse(call?.function?.arguments || '{}'); } catch { /* args نامعتبر */ }
+    if (name !== 'run_terminal_command') return `error: unknown tool ${name}`;
+    const cmd = String(args.command || '').trim();
+    if (!cmd) return 'error: empty command';
+    if (isDangerousCommand(cmd)) {
+      const ok = await this.confirmTool(chatId, userId, cmd);
+      if (!ok) return 'The user declined to run this command. Ask before retrying.';
+    }
+    const cwd = args.cwd || this.cfg.workdir || process.cwd();
+    const timeout = (Number(args.timeoutSec) || this.cfg.cmdTimeoutSec || 60) * 1000;
+    try {
+      const { stdout, stderr } = await execp(cmd, { timeout, maxBuffer: 2e6, cwd });
+      return (`${stdout}${stderr ? `\nSTDERR:\n${stderr}` : ''}`.trim() || '(no output)').slice(0, 6000);
+    } catch (e) {
+      const out = `${e.stdout || ''}${e.stderr ? `\nSTDERR:\n${e.stderr}` : ''}`.trim();
+      return `Command failed (exit ${e.code ?? '?'}): ${out || e.message}`.slice(0, 6000);
+    }
+  }
+
+  /** حلقهٔ ابزار: مدل دستور می‌خواهد، ما اجرا می‌کنیم و نتیجه را برمی‌گردانیم */
+  async agentLoop(chatId, userId, messages) {
+    const model = this.settings.getModel();
+    const tools = this.serverTools();
+    const MAX_STEPS = 8;
+    for (let step = 0; step < MAX_STEPS; step++) {
+      const { message } = await this.chat.rawComplete({ model, messages, tools });
+      const calls = message?.tool_calls;
+      if (Array.isArray(calls) && calls.length) {
+        messages.push({ role: 'assistant', content: message.content || '', tool_calls: calls });
+        for (const call of calls) {
+          const result = await this.executeTool(chatId, userId, call);
+          messages.push({ role: 'tool', tool_call_id: call.id, name: call?.function?.name, content: String(result) });
+        }
+        continue;
+      }
+      return (message?.content || '').toString();
+    }
+    return this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)');
+  }
+
   /** اجرای واقعی چت روی سشن موجود */
   async runChat(chatId, userId, name, session, text) {
     this.busy.add(userId);
     const progress = await this.send(chatId, '🤔 …');
     try {
       const history = session.messages.slice(-16);
+      const sys = this.cfg.serverTools
+        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزار run_terminal_command داری؛ با آن می‌توانی روی سرور دستور اجرا کنی و خروجی را ببینی. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have the run_terminal_command tool to run commands and see output. Be concise.')
+        : this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant. Be concise.');
       const messages = [
-        { role: 'system', content: 'تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده.' },
+        { role: 'system', content: sys },
         ...history,
         { role: 'user', content: text },
       ];
 
-      const answer = await this.chat.complete({ model: this.settings.getModel(), messages });
+      const answer = this.cfg.serverTools
+        ? await this.agentLoop(chatId, userId, messages)
+        : await this.chat.complete({ model: this.settings.getModel(), messages });
       this.state.pushMessage(userId, name, { role: 'user', content: text });
       this.state.pushMessage(userId, name, { role: 'assistant', content: answer });
 

@@ -281,7 +281,11 @@ export class FreebuffChat {
    * یک پیام بفرست و پاسخ مدل را بگیر (بدون streaming).
    * history: آرایه‌ی {role, content}
    */
-  async complete({ model, messages, maxTokens = 2048, agent }, retry = true) {
+  /**
+   * یک درخواست خام به chat/completions؛ پیام assistant کامل (شامل tool_calls)
+   * را برمی‌گرداند تا حلقهٔ ابزار در لایهٔ بالاتر اجرا شود.
+   */
+  async rawComplete({ model, messages, tools, maxTokens = 2048, agent }, retry = true) {
     if (!this.authToken) throw new Error('احراز هویت فری‌باف تنظیم نشده است');
     // سشن معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
     // همان سشن admitted باشد وگرنه 409 session_superseded.
@@ -301,6 +305,7 @@ export class FreebuffChat {
         model: useModel,
         messages: withCliSystemPrompt(messages),
         max_tokens: maxTokens,
+        ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
         codebuff_metadata: {
           run_id: runId,
           cost_mode: 'free',
@@ -318,7 +323,7 @@ export class FreebuffChat {
         log.warn('سشن منقضی شده بود (428)؛ تمدید و تلاش دوباره');
         // اگر تمدید شکست خورد (مثلاً سهمیه تمام است) همان خطا را نشان بده.
         await this.renewSession(useModel);
-        return this.complete({ model, messages, maxTokens, agent }, false);
+        return this.rawComplete({ model, messages, tools, maxTokens, agent }, false);
       }
       const err = new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);
       err.status = res.status;
@@ -326,18 +331,25 @@ export class FreebuffChat {
       throw err;
     }
 
-    let answer = '';
+    await this.finishRun(runId);
+
+    let message = {};
     try {
       const data = JSON.parse(text);
-      answer = data.choices?.[0]?.message?.content ?? '';
-      if (Array.isArray(answer)) {
-        answer = answer.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('');
+      message = data.choices?.[0]?.message ?? { content: '' };
+      if (Array.isArray(message.content)) {
+        message.content = message.content.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('');
       }
     } catch {
-      answer = text.slice(0, 2000);
+      message = { content: text.slice(0, 2000) };
     }
+    return { message };
+  }
 
-    await this.finishRun(runId);
-    return answer.trim();
+  /** پاسخ متنی ساده (بدون ابزار) */
+  async complete(args) {
+    const { message } = await this.rawComplete(args);
+    const content = message?.content ?? '';
+    return (typeof content === 'string' ? content : '').trim();
   }
 }
