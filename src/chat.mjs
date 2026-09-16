@@ -118,12 +118,37 @@ export class FreebuffChat {
 
   /** IP خروجی فعلی؛ proxy=null برای اتصال مستقیم، undefined برای پروکسی اکانت فعال */
   async exitIp(proxy) {
-    const res = await this.req('https://api.ipify.org?format=json', {}, proxy);
-    const text = await res.text();
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
-    const ip = JSON.parse(text)?.ip;
-    if (!ip) throw new Error('پاسخ نامعتبر از سرویس IP');
-    return ip;
+    // بعضی پروکسی‌ها به برخی سرویس‌های نمایش IP دسترسی ندارند (timeout)؛
+    // پس چند سرویس مختلف را به‌ترتیب امتحان می‌کنیم و اولین پاسخ معتبر را برمی‌گردانیم.
+    const endpoints = [
+      { url: 'https://api.ipify.org?format=json', pick: (t) => JSON.parse(t)?.ip },
+      { url: 'https://ifconfig.me/ip', pick: (t) => t.trim() },
+      { url: 'https://ipinfo.io/ip', pick: (t) => t.trim() },
+      { url: 'https://api.seeip.org', pick: (t) => t.trim() },
+      { url: 'https://checkip.amazonaws.com', pick: (t) => t.trim() },
+    ];
+    let lastErr = null;
+    for (const { url, pick } of endpoints) {
+      try {
+        const res = await this.req(url, {}, proxy);
+        const text = await res.text();
+        if (!res.ok) {
+          lastErr = new Error(`HTTP ${res.status}: ${text.slice(0, 80)}`);
+          continue;
+        }
+        let ip = '';
+        try {
+          ip = String(pick(text)).trim();
+        } catch {
+          ip = '';
+        }
+        if (ip && /^[0-9a-fA-F:.]+$/.test(ip)) return ip;
+        lastErr = new Error('پاسخ نامعتبر از سرویس IP');
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('IP خروجی پیدا نشد');
   }
 
   headers(extra = {}) {

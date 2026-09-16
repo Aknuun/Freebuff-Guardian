@@ -3,6 +3,13 @@
 همهٔ تغییرات مهم این پروژه اینجا ثبت می‌شود. قالب بر اساس [Keep a Changelog](https://keepachangelog.com/fa/1.1.0/)
 و نسخه‌گذاری بر اساس [Semantic Versioning](https://semver.org/).
 
+## [1.22.1] - 2026-09-16
+
+### Changed
+- رفع تست پروکسی: fallback چند سرویس IP
+
+  تست پروکسی اکانت فقط api.ipify.org را صدا می‌زد؛ بعضی پروکسی‌ها به آن دسترسی ندارند و تست همیشه «کار نکرد» نشان می‌داد. حالا به‌ترتیب ipify → ifconfig.me → ipinfo.io → api.seeip.org → checkip.amazonaws.com امتحان می‌شود.
+
 ## [1.22.0] - 2026-09-16
 
 ### Changed
