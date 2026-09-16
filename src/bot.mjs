@@ -122,7 +122,6 @@ export class GuardianBot {
         label: cfg.fbDefaultLabel,
       },
     });
-    this.pendingAdd = new Map(); // userId → نام اکانتی که منتظر JSON آن هستیم
     this.pendingName = new Map(); // userId → منتظر نام دلخواه اکانت هستیم
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
     this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت جلسه است { chatId, text, name }
@@ -140,6 +139,8 @@ export class GuardianBot {
     this.replyShown = new Set(); // chatId هایی که کیبورد ثابت برایشان فرستاده شده
     this.sessionWarned = false;
     this.lastProbe = 0;
+    this.renewTimer = null; // تایمر تمدید خودکار جلسه
+    this.autoRenewOn = state.getMeta('autoRenew') === true;
 
     // دقیقهٔ هشدار انقضا: از state خوانده می‌شود و از طریق تنظیمات قابل تغییر است
     const fromState = state.getMeta('sessionWarnMin');
@@ -285,7 +286,10 @@ export class GuardianBot {
       disable_web_page_preview: true,
       reply_markup: {
         inline_keyboard: [
-          [{ text: this.tr('🔗 باز کردن صفحهٔ ورود', '🔗 Open login page'), url: code.loginUrl, style: 'success' }],
+          [
+            { text: this.tr('🔗 باز کردن صفحهٔ ورود', '🔗 Open login page'), url: code.loginUrl, style: 'success' },
+            { text: this.tr('📋 کپی آدرس لاگین', '📋 Copy login link'), copy_text: { text: code.loginUrl }, style: 'primary' },
+          ],
           [
             btn(this.tr('🔄 بررسی تأیید', '🔄 Check now'), 'accwebcheck', 'primary'),
             btn(this.tr('🔗 ساخت لینک جدید', '🔗 New link'), `accwebnew:${st.name || ''}`, 'primary'),
@@ -296,8 +300,8 @@ export class GuardianBot {
     };
     const title = st.name ? `«${st.name}»` : this.tr('جدید', 'new');
     return this.send(chatId, this.tr(
-      `🌐 *افزودن اکانت ${title}*\n\n۱) دکمهٔ «🔗 باز کردن صفحهٔ ورود» را بزن.\n۲) در سایت فری‌باف لاگین کن و تأیید کن.\n\n⚠️ اگر سایت گفت «This login link was already used»، دکمهٔ «🔗 ساخت لینک جدید» را بزن.\n\n⏳ منتظر تأیید هستم…`,
-      `🌐 *Add account ${title}*\n\n1) Tap "🔗 Open login page".\n2) Sign in on the Freebuff site and confirm.\n\n⚠️ If the site says "This login link was already used", tap "🔗 New link".\n\n⏳ Waiting for confirmation…`,
+      `🌐 *افزودن اکانت ${title}*\n\n۱) دکمهٔ «🔗 باز کردن صفحهٔ ورود» را بزن.\n۲) در سایت فری‌باف لاگین کن و تأیید کن.\n\n📋 اگر لازم شد، «کپی آدرس لاگین» لینک را کپی می‌کند.\n⚠️ اگر سایت گفت «This login link was already used»، دکمهٔ «🔗 ساخت لینک جدید» را بزن.\n\n⏳ منتظر تأیید هستم…`,
+      `🌐 *Add account ${title}*\n\n1) Tap "🔗 Open login page".\n2) Sign in on the Freebuff site and confirm.\n\n📋 If needed, "Copy login link" copies the URL.\n⚠️ If the site says "This login link was already used", tap "🔗 New link".\n\n⏳ Waiting for confirmation…`,
     ), kb);
   }
 
@@ -341,7 +345,6 @@ export class GuardianBot {
     const suffix = `:${name}`;
     return [
       [btn(this.tr('🌐 ورود با وب', '🌐 Web login'), `accweb${suffix}`, 'success')],
-      [btn(this.tr('📋 پیست credentials.json', '📋 Paste credentials.json'), `accjson${suffix}`)],
       [btn(this.tr('✏️ با نام دلخواه', '✏️ Custom name'), 'accnamed')],
       [btn(this.tr('↩️ اکانت‌ها', '↩️ Accounts'), 'menu:account')],
     ];
@@ -608,7 +611,23 @@ export class GuardianBot {
   timerButtonText() {
     const left = this.chat.remainingMs();
     if (left == null) return this.tr('⏳ جلسه بسته — /start', '⏳ Session closed — /start');
-    return this.tr(`⏳ جلسه: ${humanMs(left)}`, `⏳ Session: ${humanMs(left, 'en')}`);
+    return this.tr(`⏳ جلسه: ${humanMs(left)} مانده`, `⏳ Session: ${humanMs(left, 'en')} left`);
+  }
+
+  /** روشن/خاموش‌کردن تمدید خودکار جلسه (تایمر در انتظار لغو می‌شود) */
+  setAutoRenew(on) {
+    this.autoRenewOn = !!on;
+    this.state.setMeta('autoRenew', this.autoRenewOn);
+    // تمدید خودکار به هشدار قبل از انقضا وابسته است؛ اگر خاموش بود روی ۵ دقیقه بگذار
+    if (this.autoRenewOn && this.warnMin <= 0) {
+      this.warnMin = 5;
+      this.state.setMeta('sessionWarnMin', 5);
+    }
+    if (!this.autoRenewOn) this.cancelAutoRenew();
+  }
+
+  cancelAutoRenew() {
+    if (this.renewTimer) { clearTimeout(this.renewTimer); this.renewTimer = null; }
   }
 
   homeKeyboard(u) {
@@ -683,8 +702,7 @@ export class GuardianBot {
         '',
         'برای استفادهٔ شریکی؛ هرکس اکانت خودش.',
         '«➕ افزودن اکانت» را بزن و یکی را انتخاب کن:',
-        '• «🌐 ورود با وب» — لینک لاگین می‌دهد؛ در سایت فری‌باف لاگین کن.',
-        '• «📋 پیست credentials.json» — اگر فایل را داری.',
+        '• «🌐 ورود با وب» — لینک لاگین می‌دهد (با دکمهٔ کپی آدرس)؛ در سایت فری‌باف لاگین کن.',
         '• «✏️ با نام دلخواه» — قبلش اسم بده.',
         '',
         'هر اکانت جلسه و باک مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
@@ -712,6 +730,7 @@ export class GuardianBot {
         '• «📢 تبلیغات» — روشن/خاموش',
         '• «🤖 مدل» — مدل فعال',
         '• «⏰ هشدار انقضا» — چند دقیقه قبل هشدار بدهد',
+        '• «🔁 تمدید خودکار» — ۵ دقیقه قبل هشدار می‌دهد و سر موعد جلسه را خودکار تازه می‌کند (با دکمهٔ لغو)',
         '• «🌐» بین دو دکمهٔ سرور و راهنما زبان را عوض می‌کند',
       ].join('\n'),
     };
@@ -752,8 +771,7 @@ export class GuardianBot {
         '',
         'For shared use; each person uses their own account.',
         'Tap "➕ Add account" and choose:',
-        '• "🌐 Web login" — gives a login link; sign in on the Freebuff site.',
-        '• "📋 Paste credentials.json" — if you have the file.',
+        '• "🌐 Web login" — gives a login link (with a copy-link button); sign in on the Freebuff site.',
         '• "✏️ Custom name" — set a name first.',
         '',
         'Each account has its own session and Bucks; tap it to activate.',
@@ -781,6 +799,7 @@ export class GuardianBot {
         '• "📢 Ads" — on/off',
         '• "🤖 Model" — active model',
         '• "⏰ Expiry warning" — minutes before expiry',
+        '• "🔁 Auto-renew" — warns 5 min before and renews the session automatically (with a cancel button)',
         '• "🌐" between Server and Help switches the language',
       ].join('\n'),
     };
@@ -792,6 +811,9 @@ export class GuardianBot {
     const warn = this.warnMin > 0
       ? this.tr(`${this.warnMin} دقیقه قبل از انقضا`, `${this.warnMin} min before expiry`)
       : this.tr('خاموش', 'off');
+    const auto = this.autoRenewOn
+      ? this.tr(`روشن (${this.warnMin} دقیقه قبل هشدار می‌دهد)`, `on (warns ${this.warnMin} min before)`)
+      : this.tr('خاموش', 'off');
     return [
       this.tr('⚙️ *تنظیمات*', '⚙️ *Settings*'),
       this.tr(`🎛 نوع پاسخ: ${this.modeLabel(this.settings.getMode())}`, `🎛 Response mode: ${this.modeLabel(this.settings.getMode())}`),
@@ -799,6 +821,7 @@ export class GuardianBot {
       this.tr(`🤖 مدل: \`${this.settings.getModel()}\``, `🤖 Model: \`${this.settings.getModel()}\``),
       this.tr(`👤 اکانت فعال: \`${this.activeAccountName()}\``, `👤 Active account: \`${this.activeAccountName()}\``),
       this.tr(`⏰ هشدار انقضای جلسه: ${warn}`, `⏰ Session expiry warning: ${warn}`),
+      this.tr(`🔁 تمدید خودکار جلسه: ${auto}`, `🔁 Auto-renew session: ${auto}`),
     ].join('\n');
   }
 
@@ -814,6 +837,7 @@ export class GuardianBot {
       [btn(this.tr(`🤖 مدل: ${this.settings.getModel()}`, `🤖 Model: ${this.settings.getModel()}`), 'menu:model', 'primary')],
       [btn(this.tr(`👤 اکانت: ${this.activeAccountName()}`, `👤 Account: ${this.activeAccountName()}`), 'menu:account', 'primary')],
       [warnBtn(0, this.tr('خاموش', 'off')), warnBtn(2, '2m'), warnBtn(5, '5m'), warnBtn(10, '10m')],
+      [btn(this.tr(`🔁 تمدید خودکار: ${this.autoRenewOn ? 'روشن' : 'خاموش'}`, `🔁 Auto-renew: ${this.autoRenewOn ? 'on' : 'off'}`), 'menu:autorenew', this.autoRenewOn ? 'success' : 'danger')],
       [btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')],
       [btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')],
     ];
@@ -975,6 +999,7 @@ export class GuardianBot {
 
   /** بستن جلسه فعلی و ساخت جلسه تازه (ریست تایمر ۱ ساعته) */
   async doRenew(chatId, messageId) {
+    this.cancelAutoRenew(); // تمدید دستی جای تایمر خودکار را می‌گیرد
     this.applyActiveAccount();
     const sess = await this.chat.activeSession().catch(() => null);
     const model = sess?.model || this.settings.getModel();
@@ -997,7 +1022,24 @@ export class GuardianBot {
     }
   }
 
-  /** هشدار یک‌باره پیش از انقضای جلسه */
+  /** ارسال پیام به همهٔ کاربران مجاز */
+  async messageAll(text, extra = {}) {
+    for (const id of this.cfg.allowedUserIds) {
+      const chatId = this.state.user(id).chatId;
+      if (chatId) await this.send(chatId, text, extra).catch(() => {});
+    }
+  }
+
+  /** اولین chatId موجود (برای اطلاع‌رسانی در تمدید خودکار) */
+  firstChatId() {
+    for (const id of this.cfg.allowedUserIds) {
+      const chatId = this.state.user(id).chatId;
+      if (chatId) return chatId;
+    }
+    return null;
+  }
+
+  /** هشدار یک‌باره پیش از انقضای جلسه (و زمان‌بندی تمدید خودکار) */
   async checkSessionWarn() {
     if (this.warnMin <= 0) { this.sessionWarned = false; return; }
     this.applyActiveAccount();
@@ -1015,15 +1057,63 @@ export class GuardianBot {
     if (left > warnMin * 60000) { this.sessionWarned = false; return; }
     if (this.sessionWarned) return;
     this.sessionWarned = true;
-    const text = this.tr(
-      `⏳ جلسه فری‌باف ${humanMs(left)} دیگر بسته می‌شود.\nبرای تمدید /renew بزن، یا پیام بعدی خودکار جلسه تازه می‌سازد.`,
-      `⏳ Freebuff session closes in ${humanMs(left, 'en')}.\nTap Renew or just send your next message to start a fresh session.`,
-    );
-    const kb = { reply_markup: { inline_keyboard: [[{ text: this.tr('🔄 تمدید جلسه', '🔄 Renew session'), callback_data: 'menu:renew' }]] } };
-    for (const id of this.cfg.allowedUserIds) {
-      const chatId = this.state.user(id).chatId;
-      if (chatId) await this.send(chatId, text, kb).catch(() => {});
+
+    if (this.autoRenewOn) {
+      await this.messageAll(
+        this.tr(
+          `⏳ جلسه فری‌باف ${humanMs(left)} دیگر بسته می‌شود.\n🔁 تمدید خودکار روشن است و سر موعد جلسه را تازه می‌کنم. اگر نمی‌خواهی «🛑 لغو تمدید خودکار» را بزن.`,
+          `⏳ Freebuff session closes in ${humanMs(left, 'en')}.\n🔁 Auto-renew is on; I'll start a fresh session when it expires. If you don't want it, tap "🛑 Cancel auto-renew".`,
+        ),
+        { reply_markup: { inline_keyboard: [[
+          btn(this.tr('🔁 تمدید الان', '🔁 Renew now'), 'menu:renew', 'success'),
+          btn(this.tr('🛑 لغو تمدید خودکار', '🛑 Cancel auto-renew'), 'menu:autorenewoff', 'danger'),
+        ]] } },
+      );
+      this.cancelAutoRenew();
+      this.renewTimer = setTimeout(() => this.doAutoRenew().catch((e) => log.warn('autoRenew:', e.message)), left + 3000);
+      this.renewTimer.unref?.();
+      return;
     }
+
+    await this.messageAll(
+      this.tr(
+        `⏳ جلسه فری‌باف ${humanMs(left)} دیگر بسته می‌شود.\nبرای تمدید /renew بزن، یا پیام بعدی خودکار جلسه تازه می‌سازد.`,
+        `⏳ Freebuff session closes in ${humanMs(left, 'en')}.\nTap Renew or just send your next message to start a fresh session.`,
+      ),
+      { reply_markup: { inline_keyboard: [[{ text: this.tr('🔄 تمدید جلسه', '🔄 Renew session'), callback_data: 'menu:renew' }]] } },
+    );
+  }
+
+  /** تمدید خودکار جلسه سر موعد (اگر کاربر لغو نکرده باشد) */
+  async doAutoRenew() {
+    this.renewTimer = null;
+    if (!this.autoRenewOn) return;
+    this.applyActiveAccount();
+    const sess = await this.chat.activeSession().catch(() => null);
+    const model = sess?.model || this.settings.getModel();
+    let account = this.activeAccountName();
+    try {
+      await this.chat.renewSession(model);
+    } catch (e) {
+      if (!this.isQuotaError(e)) {
+        await this.messageAll(this.tr(`❌ تمدید خودکار ناموفق بود: ${this.chatErrorHint(e)}`, `❌ Auto-renew failed: ${this.chatErrorHint(e)}`));
+        return;
+      }
+      const switched = await this.tryFailover(this.firstChatId(), model).catch(() => null);
+      if (!switched) {
+        await this.messageAll(this.tr('❌ تمدید خودکار ناموفق بود؛ سهمیهٔ همهٔ اکانت‌ها تمام شده.', '❌ Auto-renew failed; all accounts are out of quota.'));
+        return;
+      }
+      account = switched;
+    }
+    this.sessionWarned = false;
+    await this.messageAll(
+      this.tr(
+        `🔁 جلسه خودکار تمدید شد (اکانت \`${account}\`) — ⏳ ${humanMs(this.chat.remainingMs())} مانده`,
+        `🔁 Session auto-renewed (account \`${account}\`) — ⏳ ${humanMs(this.chat.remainingMs(), 'en')} left`,
+      ),
+      { reply_markup: { inline_keyboard: [[btn(this.tr('⚙️ تنظیمات', '⚙️ Settings'), 'menu:settings', 'primary')]] } },
+    );
   }
 
   // ---------- روتر دکمه‌ها ----------
@@ -1048,6 +1138,18 @@ export class GuardianBot {
           case 'timer': return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
           case 'renew': return this.doRenew(chatId, messageId);
           case 'settings': return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
+          case 'autorenew': {
+            this.setAutoRenew(!this.autoRenewOn);
+            await answer(this.autoRenewOn
+              ? this.tr(`تمدید خودکار روشن شد (هشدار ${this.warnMin} دقیقه قبل)`, `Auto-renew on (warning ${this.warnMin} min before)`)
+              : this.tr('تمدید خودکار خاموش شد', 'Auto-renew off'));
+            return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
+          }
+          case 'autorenewoff': {
+            this.setAutoRenew(false);
+            await answer(this.tr('تمدید خودکار لغو شد', 'Auto-renew cancelled'));
+            return this.render(chatId, messageId, this.tr('🛑 تمدید خودکار لغو شد. جلسه در موعدش بسته می‌شود.', '🛑 Auto-renew cancelled. The session will close at its expiry.'), [[btn(this.tr('⚙️ تنظیمات', '⚙️ Settings'), 'menu:settings', 'primary')]]);
+          }
           case 'account': return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
 
           case 'start': {
@@ -1169,10 +1271,6 @@ export class GuardianBot {
       case 'accweb':
         return this.startWebLogin(chatId, userId, value);
 
-      case 'accjson':
-        this.pendingAdd.set(userId, value);
-        return this.render(chatId, messageId, `📋 محتوای کامل فایل \`credentials.json\` اکانت «${value}» را پیست و بفرست.`, [[{ text: '↩️ اکانت‌ها', callback_data: 'menu:account' }]]);
-
       case 'accwebcheck': {
         const st = this.pendingLogin.get(userId);
         if (!st) { await answer(this.tr('ورود فعالی نیست', 'No active login')); return home(); }
@@ -1206,6 +1304,7 @@ export class GuardianBot {
       case 'warn': {
         this.warnMin = parseInt(value, 10) || 0;
         this.state.setMeta('sessionWarnMin', this.warnMin);
+        if (this.warnMin <= 0 && this.autoRenewOn) this.setAutoRenew(false);
         this.sessionWarned = false;
         await answer(this.warnMin > 0 ? `هشدار روی ${this.warnMin} دقیقه تنظیم شد` : 'هشدار خاموش شد');
         return this.render(chatId, messageId, this.settingsText(), this.settingsKeyboard());
@@ -1287,25 +1386,6 @@ export class GuardianBot {
     return this.send(chatId, this.tr(`افزودن اکانت «${name}» — روش را انتخاب کن:`, `Add account "${name}" — choose a method:`), { reply_markup: { inline_keyboard: this.accountMethodKeyboard(name) } });
   }
 
-  /** دریافت JSON اکانت پس از /account add */
-  async handleAccountJson(chatId, userId, text) {
-    const preferred = this.pendingAdd.get(userId) || null;
-    this.pendingAdd.delete(userId);
-    let raw;
-    try {
-      raw = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
-    } catch {
-      return this.send(chatId, this.tr('❌ JSON نامعتبر بود. دوباره «➕ افزودن اکانت» را بزن.', '❌ Invalid JSON. Tap ➕ Add account again.'));
-    }
-    try {
-      const name = this.nextAccountName(preferred, raw?.default ?? raw);
-      const acc = this.accounts.add(name, raw);
-      return this.send(chatId, this.tr(`✅ اکانت \`${acc.name}\` اضافه شد. برای فعال‌کردن روی آن بزن.`, `✅ Account \`${acc.name}\` added. Tap it to activate.`), { reply_markup: { inline_keyboard: this.accountKeyboard() } });
-    } catch (e) {
-      return this.send(chatId, `❌ ${e.message}`);
-    }
-  }
-
   // ---------- چت ----------
   /** ترجمهٔ خطاهای بک‌اند به پیام قابل‌فهم */
   chatErrorHint(e) {
@@ -1365,7 +1445,6 @@ export class GuardianBot {
       return this.runShell(chatId, text);
     }
     if (this.pendingName.has(userId)) return this.handleNameInput(chatId, userId, text);
-    if (this.pendingAdd.has(userId)) return this.handleAccountJson(chatId, userId, text);
     if (this.busy.has(userId)) {
       return this.send(chatId, this.tr('⏳ هنوز پاسخ قبلی در جریان است…', '⏳ The previous answer is still in progress…'));
     }
@@ -1591,10 +1670,12 @@ export class GuardianBot {
       this.applyActiveAccount();
       try {
         await this.chat.renewSession(model);
-        await this.send(chatId, this.tr(
-          `♻️ سهمیهٔ اکانت «${cur}» تمام شده؛ می‌رویم روی اکانت «${name}».`,
-          `♻️ Account "${cur}" quota is used up; switching to "${name}".`,
-        ));
+        if (chatId) {
+          await this.send(chatId, this.tr(
+            `♻️ سهمیهٔ اکانت «${cur}» تمام شده؛ می‌رویم روی اکانت «${name}».`,
+            `♻️ Account "${cur}" quota is used up; switching to "${name}".`,
+          )).catch(() => {});
+        }
         return name;
       } catch { /* این اکانت هم ندارد؛ بعدی */ }
     }
@@ -1606,6 +1687,7 @@ export class GuardianBot {
 
   /** اگر کمتر از مقدار هشدار تا انقضا مانده، یک پیام جدا با دکمهٔ تمدید بفرست */
   async maybeSendRenew(chatId) {
+    if (this.autoRenewOn) return; // تمدید خودکار خودش هشدار و تمدید را انجام می‌دهد
     if (!this.warnMin || this.warnMin <= 0) return;
     const left = this.chat.remainingMs();
     if (left == null || left > this.warnMin * 60000) return;

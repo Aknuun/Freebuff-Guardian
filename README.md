@@ -43,12 +43,13 @@ control over it (and over the server itself) from anywhere.
   **gray and non‑clickable**.
 - 🎛 **Response mode**: 🧩 Default · ⚡ Fast (Lite) · 🛠 Build (MAX) · 🗺 Plan — the same modes the
   CLI exposes.
-- ⚙️ **Settings menu**: response mode, ads on/off, active model, and the expiry‑warning threshold.
+- ⚙️ **Settings menu**: response mode, ads on/off, active model, expiry‑warning threshold, and
+  **auto-renew session** (warns 5 min before and renews the session automatically; with a cancel button).
 - 👤 **Multiple Freebuff accounts** (shared use): add an account via the official **Web login**
-  flow (no server needed for that account) or by pasting a `credentials.json`. The bot can
+  flow (no server needed for that account, with a copy-login-link button). The bot can
   **automatically fail over** to the next account when one runs out of quota.
 - ⏳ **Session timer**: the free session has a fixed **1‑hour** lifetime on the server; the bot shows
-  a live countdown, warns you before expiry, and shows a **renew** button only near expiry.
+  a live countdown (e.g. "51 min left"), warns you before expiry, and shows a **renew** button only near expiry.
 - 💵 **Quota view**: used/left **Freebucks** and the separate session‑count cap, in both the status
   and the accounts screens. When the quota is exhausted, you get a clear message plus
   **Add account / Switch account / Buy plan** buttons.
@@ -204,8 +205,8 @@ Behaviour:
 
 ## 👤 Accounts & automatic failover
 
-- `/account add <name>` → choose **🌐 Web login** (the bot gives a login link; sign in on the
-  Freebuff site) or **📋 Paste credentials.json** (if you already have the file).
+- `/account add <name>` → choose **🌐 Web login** (the bot gives a login link plus a copy-link
+  button; sign in on the Freebuff site).
 - Accounts are stored in `accounts/` (gitignored, permissions `600`). `default` is the server's own
   account and cannot be deleted.
 - Each account has its **own session and Freebucks**.
