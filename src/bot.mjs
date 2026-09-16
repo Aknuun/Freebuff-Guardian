@@ -285,52 +285,21 @@ export class GuardianBot {
     return out;
   }
 
+  /** متن صفحهٔ اکانت‌ها: فقط اطلاعات اکانت فعال (نه بقیه) */
   async accountText() {
-    const list = this.accounts.list();
-    const active = this.activeAccountName();
-    const quotas = await Promise.all(list.map((a) => this.chat.accountQuota(a).catch(() => null)));
+    const a = this.activeAccount();
+    if (!a) return this.noAccountText();
+    const q = await this.chat.accountQuota(a).catch(() => null);
+    const actor = a.label || a.name;
     const out = [
       this.tr('👤 *اکانت‌های فری‌باف*', '👤 *Freebuff accounts*'),
-      this.tr(`فعال: \`${active}\``, `Active: \`${active}\``),
-      '',
-    ];
-    list.forEach((a, i) => {
-      const q = quotas[i];
-      const actor = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
-      out.push(`${a.name === active ? '✅' : '•'} *${actor}*${q && q.status !== 'active' ? this.tr(' — بدون جلسه', ' — no session') : ''}`);
-      out.push(...this.quotaLinesForAccount(a, q));
-      out.push('');
-    });
-    out.push(this.tr('برای دیدن جزئیات، روی اکانت بزن.', 'Tap an account to view its details.'));
-    return out.join('\n');
-  }
-
-  /** متن جزئیات فقط یک اکانت (بدون نمایش بقیه) */
-  async accountDetailText(name) {
-    const a = this.accounts.get(name);
-    if (!a) return this.tr('❌ اکانت پیدا نشد.', '❌ Account not found.');
-    const q = await this.chat.accountQuota(a).catch(() => null);
-    const active = this.activeAccountName() === name;
-    const out = [
-      this.tr(`👤 *اکانت «${a.label || a.name}»*`, `👤 *Account "${a.label || a.name}"*`),
-      this.tr(`نام: \`${a.name}\``, `Name: \`${a.name}\``),
+      this.tr(`اکانت فعال: *${actor}* (\`${a.name}\`)`, `Active account: *${actor}* (\`${a.name}\`)`),
     ];
     if (a.email) out.push(this.tr(`ایمیل: ${a.email}`, `Email: ${a.email}`));
-    out.push(this.tr(`وضعیت: ${active ? '✅ فعال' : '⚪ غیرفعال'}`, `Status: ${active ? '✅ active' : '⚪ inactive'}`));
     out.push(...this.quotaLinesForAccount(a, q));
+    out.push('');
+    out.push(this.tr('برای دیدن/تعویض اکانت روی دکمه‌اش بزن.', 'Tap an account button to view/switch.'));
     return out.join('\n');
-  }
-
-  accountDetailKeyboard(name) {
-    const active = this.activeAccountName() === name;
-    const rows = [];
-    if (!active) rows.push([btn(this.tr('✅ فعال کردن این اکانت', '✅ Activate this account'), `accu:${name}`, 'success')]);
-    rows.push([
-      btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
-      btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
-    ]);
-    rows.push([btn(this.tr('↩️ اکانت‌ها', '↩️ Accounts'), 'menu:account'), btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')]);
-    return rows;
   }
 
   /** انتخاب نام نهایی اکانت (اگر نام دلخواه داده نشده باشد از اطلاعات کاربر) */
@@ -438,9 +407,13 @@ export class GuardianBot {
     const active = this.activeAccountName();
     const rows = this.accounts.list().map((a) => {
       const label = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
-      return [btn(`${a.name === active ? '✅ ' : ''}${label}`, `accv:${a.name}`, a.name === active ? 'success' : 'primary')];
+      return [btn(`${a.name === active ? '✅ ' : ''}${label}`, `acc:${a.name}`, a.name === active ? 'success' : 'primary')];
     });
-    rows.push([btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success')]);
+    rows.push([btn(this.tr('▶️ شروع جلسه', '▶️ Start session'), 'accstart', 'success')]);
+    rows.push([
+      btn(this.tr('➕ افزودن اکانت', '➕ Add account'), 'acc:add', 'success'),
+      btn(this.tr('🗑 حذف اکانت', '🗑 Delete account'), 'accdel', 'danger'),
+    ]);
     rows.push([
       btn(this.tr('💾 بکاپ اکانت‌ها', '💾 Backup accounts'), 'acc:backup', 'primary'),
       btn(this.tr('♻️ ریستور از فایل', '♻️ Restore from file'), 'acc:restore', 'primary'),
@@ -868,8 +841,10 @@ export class GuardianBot {
         '• «🌐 ورود با وب» — لینک لاگین می‌دهد (با دکمهٔ کپی آدرس)؛ در سایت فری‌باف لاگین کن.',
         '• «✏️ با نام دلخواه» — قبلش اسم بده.',
         '',
-        'هر اکانت جلسه و باک مستقل دارد؛ با زدن روی اکانت جزئیاتش را می‌بینی و با دکمهٔ «✅ فعال کردن این اکانت» فعال می‌شود.',
-        '💾 «بکاپ اکانت‌ها» فایل پشتیبان می‌سازد و «♻️ ریستور از فایل» آن را برمی‌گرداند.',
+        'هر اکانت جلسه و باک مستقل دارد؛ روی دکمهٔ هر اکانت بزن تا فعال شود و اطلاعاتش همان‌جا نشان داده شود.',
+        '• «▶️ شروع جلسه» برای اکانت فعال جلسه می‌سازد.',
+        '• «🗑 حذف اکانت» اکانت فعال را حذف می‌کند (default حذف نمی‌شود).',
+        '• «💾 بکاپ اکانت‌ها» فایل پشتیبان می‌سازد و «♻️ ریستور از فایل» آن را برمی‌گرداند.',
       ].join('\n'),
       chat: [
         '💬 *چت و جلسه‌ها*',
@@ -938,8 +913,10 @@ export class GuardianBot {
         '• "🌐 Web login" — gives a login link (with a copy-link button); sign in on the Freebuff site.',
         '• "✏️ Custom name" — set a name first.',
         '',
-        'Each account has its own session and Bucks; tap it to view its details and activate it with "✅ Activate this account".',
-        '💾 "Backup accounts" creates a backup file and "♻️ Restore from file" brings it back.',
+        'Each account has its own session and Bucks; tap an account button to activate it and see its details right here.',
+        '• "▶️ Start session" starts a session for the active account.',
+        '• "🗑 Delete account" deletes the active account (default cannot be deleted).',
+        '• "💾 Backup accounts" creates a backup file and "♻️ Restore from file" brings it back.',
       ].join('\n'),
       chat: [
         '💬 *Chat & sessions*',
@@ -1467,26 +1444,55 @@ export class GuardianBot {
           await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
           return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
         }
-        return this.render(chatId, messageId, await this.accountDetailText(value), this.accountDetailKeyboard(value));
-      }
-
-      case 'accv': {
-        if (!this.accounts.has(value)) {
-          await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
-          return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
-        }
-        return this.render(chatId, messageId, await this.accountDetailText(value), this.accountDetailKeyboard(value));
-      }
-
-      case 'accu': {
-        if (!this.accounts.has(value)) {
-          await answer(this.tr('اکانت پیدا نشد', 'Account not found'));
-          return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
-        }
         this.state.setMeta('activeAccount', value);
         this.applyActiveAccount();
         await answer(this.tr(`اکانت فعال: ${value}`, `Active account: ${value}`));
-        return this.render(chatId, messageId, await this.accountDetailText(value), this.accountDetailKeyboard(value));
+        return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+      }
+
+      case 'accstart': {
+        this.applyActiveAccount();
+        const sess = await this.chat.activeSession().catch(() => null);
+        if (sess) {
+          await answer(this.tr('جلسه فعال است', 'Session is active'));
+        } else {
+          await answer(this.tr('ساخت جلسه…', 'Starting session…'));
+          try {
+            await this.chat.renewSession(this.settings.getModel());
+          } catch (e) {
+            await answer(this.chatErrorHint(e).slice(0, 200));
+          }
+        }
+        return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
+      }
+
+      case 'accdel': {
+        const a = this.activeAccount();
+        if (!a) { await answer(this.tr('اکانتی نیست', 'No account')); return home(); }
+        if (a.name === 'default') {
+          await answer(this.tr('اکانت default قابل حذف نیست', 'The default account cannot be deleted'));
+          return;
+        }
+        return this.render(chatId, messageId, this.tr(
+          `🗑 اکانت «${a.name}» حذف شود؟`,
+          `🗑 Delete account "${a.name}"?`,
+        ), [
+          [btn(this.tr('🗑 بله، حذف کن', '🗑 Yes, delete'), 'accdelc', 'danger')],
+          [btn(this.tr('↩️ انصراف', '↩️ Cancel'), 'menu:account')],
+        ]);
+      }
+
+      case 'accdelc': {
+        const a = this.activeAccount();
+        if (!a || a.name === 'default') { await answer(this.tr('قابل حذف نیست', 'Cannot delete')); return home(); }
+        try { this.accounts.remove(a.name); } catch (e) { await answer(e.message); }
+        const remaining = this.accounts.list();
+        const next = remaining.find((x) => x.name === 'default')?.name || remaining[0]?.name || 'default';
+        this.state.setMeta('activeAccount', next);
+        this.applyActiveAccount();
+        await answer(this.tr(`اکانت «${a.name}» حذف شد`, `Account "${a.name}" deleted`));
+        if (this.hasNoAccount()) return home();
+        return this.render(chatId, messageId, await this.accountText(), this.accountKeyboard());
       }
 
       case 'accnamed':

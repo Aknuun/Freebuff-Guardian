@@ -200,6 +200,9 @@ Behaviour:
 - Accounts are stored in `accounts/` (gitignored, permissions `600`). `default` is the server's own
   account and cannot be deleted.
 - Each account has its **own session and Freebucks**.
+- The Accounts page shows only the **active** account's details; tap any account button to activate
+  it and see its info right there. **▶️ Start session**, **➕ Add account** and **🗑 Delete account**
+  are on the same page.
 - When the active account's quota is exhausted, the bot asks:
   `♻️ Account "X" quota is used up; switching to "Y".`
   with **➡️ Switch to Y** and **❌ Cancel** buttons. If you don't tap within **1 minute**, it
