@@ -2377,8 +2377,8 @@ export class GuardianBot {
     try {
       const history = session.messages.slice(-16);
       const sys = this.cfg.serverTools
-        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزارهای run_terminal_command، read_file، list_directory و write_file داری و می‌توانی هر کاری روی سرور انجام دهی. کوتاه، دقیق و فارسی جواب بده. همهٔ افکار و استدلال‌هایت را هم قدم‌به‌قدم و به فارسی بنویس.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have run_terminal_command, read_file, list_directory and write_file tools and can do anything on the server. Be concise.')
-        : this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده. همهٔ افکار و استدلال‌هایت را هم قدم‌به‌قدم و به فارسی بنویس.', 'You are Freebuff Guardian, a technical assistant. Be concise.');
+        ? this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی روی همین سرور. ابزارهای run_terminal_command، read_file، list_directory و write_file داری و می‌توانی هر کاری روی سرور انجام دهی. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant on THIS server. You have run_terminal_command, read_file, list_directory and write_file tools and can do anything on the server. Be concise.')
+        : this.tr('تو نگهبان فری‌باف هستی؛ دستیار فنی کاربر روی سرور خودش. کوتاه، دقیق و فارسی جواب بده.', 'You are Freebuff Guardian, a technical assistant. Be concise.');
       const messages = [
         { role: 'system', content: sys },
         ...history,
