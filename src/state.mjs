@@ -1,4 +1,4 @@
-// state.mjs — ذخیره‌سازی state کاربران و سشن‌های چت
+// state.mjs — ذخیره‌سازی state کاربران و جلسه‌های چت
 import fs from 'node:fs';
 import { makeLogger } from './logger.mjs';
 
@@ -54,7 +54,7 @@ export class StateStore {
     return this.data.users[userId];
   }
 
-  // --- سشن‌ها ---
+  // --- جلسه‌ها ---
   listSessions(userId) {
     return Object.keys(this.user(userId).sessions);
   }

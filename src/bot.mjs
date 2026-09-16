@@ -7,11 +7,11 @@
 //   /mode [m]           تغییر نوع پاسخ (DEFAULT|LITE|MAX|PLAN)
 //   /model [m]          دیدن/تغییر مدل
 //   /ads on|off         تبلیغات
-//   /new [نام]          سشن چت جدید
-//   /sessions           لیست سشن‌ها
-//   /switch <نام>       سوییچ سشن
-//   /del <نام>          حذف سشن
-//   /clear              پاک‌کردن تاریخچه سشن فعال
+//   /new [نام]          جلسه چت جدید
+//   /sessions           لیست جلسه‌ها
+//   /switch <نام>       سوییچ جلسه
+//   /del <نام>          حذف جلسه
+//   /clear              پاک‌کردن تاریخچه جلسه فعال
 //   /restart [svc]      ری‌استارت سرویس systemd
 //   /ps                 پروسه‌های کلیدی سرور
 //   /freebuff restart|stop|start  کنترل CLI فری‌باف
@@ -72,7 +72,7 @@ function accountSlug(user) {
   return base.split('@')[0].replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 }
 
-/** خطوط سهمیه (استفاده‌شده/مانده) از پاسخ سشن */
+/** خطوط سهمیه (استفاده‌شده/مانده) از پاسخ جلسه */
 function quotaLines(q, lang = 'fa') {
   const en = lang === 'en';
   const lines = [];
@@ -80,7 +80,7 @@ function quotaLines(q, lang = 'fa') {
   if (w) {
     lines.push(en
       ? `🎟 Sessions — today: ${w.dayUsed}/${w.dayLimit} (${Math.max(0, w.dayLimit - w.dayUsed)} left) | week: ${w.weekUsed}/${w.weekLimit} | month: ${w.monthUsed}/${w.monthLimit}`
-      : `🎟 سشن — امروز: ${w.dayUsed}/${w.dayLimit} (${Math.max(0, w.dayLimit - w.dayUsed)} مانده) | هفته: ${w.weekUsed}/${w.weekLimit} | ماه: ${w.monthUsed}/${w.monthLimit}`);
+      : `🎟 جلسه — امروز: ${w.dayUsed}/${w.dayLimit} (${Math.max(0, w.dayLimit - w.dayUsed)} مانده) | هفته: ${w.weekUsed}/${w.weekLimit} | ماه: ${w.monthUsed}/${w.monthLimit}`);
   }
   const d = q?.freebucks?.daily;
   if (d) {
@@ -125,7 +125,7 @@ export class GuardianBot {
     this.pendingAdd = new Map(); // userId → نام اکانتی که منتظر JSON آن هستیم
     this.pendingName = new Map(); // userId → منتظر نام دلخواه اکانت هستیم
     this.pendingLogin = new Map(); // userId → ورود وب در جریان { name, fingerprintId, fingerprintHash, expiresAt, timer }
-    this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت سشن است { chatId, text, name }
+    this.pendingChat = new Map(); // userId → پیامی که منتظر تأیید ساخت جلسه است { chatId, text, name }
     this.pendingSh = new Set(); // userId → منتظر دستور شل هستیم
     this.pendingConfirm = new Map(); // id → resolve برای تأیید دستور خطرناک
     this.chat = new FreebuffChat({
@@ -143,7 +143,7 @@ export class GuardianBot {
     const fromState = state.getMeta('sessionWarnMin');
     this.warnMin = parseInt(fromState ?? process.env.SESSION_WARN_MIN ?? '5', 10) || 0;
 
-    // هشدار پیش از انقضای سشن (هر دقیقه بررسی؛ فقط یک‌بار در هر سشن)
+    // هشدار پیش از انقضای جلسه (هر دقیقه بررسی؛ فقط یک‌بار در هر جلسه)
     this.warnTimer = setInterval(() => this.checkSessionWarn().catch((e) => log.warn('sessionWarn:', e.message)), 60000);
     this.warnTimer.unref?.();
 
@@ -225,7 +225,7 @@ export class GuardianBot {
       const w = q?.freeWindows;
       const price = q?.freebucks?.prices?.[model];
       const actor = a.label && a.label !== a.name ? `${a.name} — ${a.label}` : a.name;
-      out.push(`${a.name === active ? '✅' : '•'} *${actor}*${q && q.status !== 'active' ? this.tr(' — بدون سشن', ' — no session') : ''}`);
+      out.push(`${a.name === active ? '✅' : '•'} *${actor}*${q && q.status !== 'active' ? this.tr(' — بدون جلسه', ' — no session') : ''}`);
       if (daily) {
         const left = Math.max(0, daily.remaining ?? 0);
         const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - left);
@@ -234,7 +234,7 @@ export class GuardianBot {
       } else {
         out.push(this.tr('   💵 سهمیه: —', '   💵 quota: —'));
       }
-      if (w) out.push(this.tr(`   🎟 سشن مانده — روز ${Math.max(0, w.dayLimit - w.dayUsed)} · هفته ${Math.max(0, w.weekLimit - w.weekUsed)} · ماه ${Math.max(0, w.monthLimit - w.monthUsed)}`, `   🎟 sessions left — day ${Math.max(0, w.dayLimit - w.dayUsed)} · week ${Math.max(0, w.weekLimit - w.weekUsed)} · month ${Math.max(0, w.monthLimit - w.monthUsed)}`));
+      if (w) out.push(this.tr(`   🎟 جلسه مانده — روز ${Math.max(0, w.dayLimit - w.dayUsed)} · هفته ${Math.max(0, w.weekLimit - w.weekUsed)} · ماه ${Math.max(0, w.monthLimit - w.monthUsed)}`, `   🎟 sessions left — day ${Math.max(0, w.dayLimit - w.dayUsed)} · week ${Math.max(0, w.weekLimit - w.weekUsed)} · month ${Math.max(0, w.monthLimit - w.monthUsed)}`));
       out.push('');
     });
     out.push(this.tr('برای تعویض، روی اکانت بزن.', 'Tap an account to switch.'));
@@ -420,12 +420,12 @@ export class GuardianBot {
         } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
         await this.send(chatId, `⏳ در حال سوییچ به \`${arg}\`…`);
         try {
-          // سشن رایگان سمت سرور به مدل قفل است؛ برای تغییر، سشن فعلی بسته و
-          // سشن جدید با مدل خواسته‌شده ساخته می‌شود.
+          // جلسه رایگان سمت سرور به مدل قفل است؛ برای تغییر، جلسه فعلی بسته و
+          // جلسه جدید با مدل خواسته‌شده ساخته می‌شود.
           const session = await this.chat.switchSessionModel(arg);
           this.settings.setModel(arg);
           const agent = freeAgentForModel(arg);
-          const left = session.remainingMs ? `\n⏳ باقیمانده سشن: ${Math.round(session.remainingMs / 60000)} دقیقه` : '';
+          const left = session.remainingMs ? `\n⏳ باقیمانده جلسه: ${Math.round(session.remainingMs / 60000)} دقیقه` : '';
           return this.send(chatId, `✅ مدل روی \`${arg}\` تنظیم شد${agent ? `\nایجنت رایگان: \`${agent}\`` : ''}${left}`);
         } catch (e) { return this.send(chatId, `❌ ${e.message}`); }
       }
@@ -475,32 +475,32 @@ export class GuardianBot {
       case '/new': {
         const name = arg || `chat-${Object.keys(u.sessions).length + 1}`;
         this.state.ensureSession(userId, name);
-        return this.send(chatId, this.tr(`✅ سشن \`${name}\` ساخته شد و فعال شد`, `✅ Chat \`${name}\` created and activated`));
+        return this.send(chatId, this.tr(`✅ جلسه \`${name}\` ساخته شد و فعال شد`, `✅ Chat \`${name}\` created and activated`));
       }
 
       case '/sessions': {
         const names = this.state.listSessions(userId);
-        if (!names.length) return this.send(chatId, this.tr('هیچ سشنی نیست. /new بزن.', 'No chats yet. Send /new.'));
+        if (!names.length) return this.send(chatId, this.tr('هیچ جلسهی نیست. /new بزن.', 'No chats yet. Send /new.'));
         return this.send(chatId, names.map((n) => `${n === u.activeSession ? '👉' : '•'} ${n} (${this.state.getSession(userId, n).messages.length} پیام)`).join('\n'));
       }
 
       case '/switch': {
-        if (!arg || !this.state.getSession(userId, arg)) return this.send(chatId, this.tr('سشن پیدا نشد. /sessions را ببین.', 'Chat not found. See /sessions.'));
+        if (!arg || !this.state.getSession(userId, arg)) return this.send(chatId, this.tr('جلسه پیدا نشد. /sessions را ببین.', 'Chat not found. See /sessions.'));
         u.activeSession = arg;
         this.state.save();
         return this.send(chatId, this.tr(`✅ سوییچ شد به \`${arg}\``, `✅ Switched to \`${arg}\``));
       }
 
       case '/del': {
-        if (!arg || !this.state.getSession(userId, arg)) return this.send(chatId, this.tr('سشن پیدا نشد.', 'Chat not found.'));
+        if (!arg || !this.state.getSession(userId, arg)) return this.send(chatId, this.tr('جلسه پیدا نشد.', 'Chat not found.'));
         this.state.deleteSession(userId, arg);
-        return this.send(chatId, this.tr(`🗑 سشن \`${arg}\` حذف شد`, `🗑 Chat \`${arg}\` deleted`));
+        return this.send(chatId, this.tr(`🗑 جلسه \`${arg}\` حذف شد`, `🗑 Chat \`${arg}\` deleted`));
       }
 
       case '/clear': {
-        if (!u.activeSession) return this.send(chatId, 'سشن فعالی نیست.');
+        if (!u.activeSession) return this.send(chatId, 'جلسه فعالی نیست.');
         this.state.clearMessages(userId, u.activeSession);
-        return this.send(chatId, this.tr('🧹 تاریخچه سشن فعال پاک شد', '🧹 Active chat history cleared'));
+        return this.send(chatId, this.tr('🧹 تاریخچه جلسه فعال پاک شد', '🧹 Active chat history cleared'));
       }
 
       case '/sh':
@@ -579,19 +579,19 @@ export class GuardianBot {
   /** متن دکمهٔ ثابت تایمر در پایین منو */
   timerButtonText() {
     const left = this.chat.remainingMs();
-    if (left == null) return this.tr('⏳ سشن بسته — /start', '⏳ Session closed — /start');
-    return this.tr(`⏳ سشن: ${humanMs(left)}`, `⏳ Session: ${humanMs(left, 'en')}`);
+    if (left == null) return this.tr('⏳ جلسه بسته — /start', '⏳ Session closed — /start');
+    return this.tr(`⏳ جلسه: ${humanMs(left)}`, `⏳ Session: ${humanMs(left, 'en')}`);
   }
 
   homeKeyboard(u) {
     const langLabel = this.lang() === 'fa' ? '🌐 EN' : '🌐 فا';
     return [
       [
-        btn(this.tr(`💬 سشن‌ها (${u.activeSession ?? '—'})`, `💬 Chats (${u.activeSession ?? '—'})`), 'menu:sessions', 'primary'),
+        btn(this.tr(`💬 جلسه‌ها (${u.activeSession ?? '—'})`, `💬 Chats (${u.activeSession ?? '—'})`), 'menu:sessions', 'primary'),
         btn(this.tr('⚙️ تنظیمات', '⚙️ Settings'), 'menu:settings', 'primary'),
         btn(this.tr('👤 اکانت‌ها', '👤 Accounts'), 'menu:account', 'primary'),
       ],
-      [btn(this.tr('➕ سشن جدید', '➕ New chat'), 'menu:new', 'success'), btn(this.tr('🧹 پاک‌کردن تاریخچه', '🧹 Clear history'), 'menu:clear', 'danger')],
+      [btn(this.tr('➕ جلسه جدید', '➕ New chat'), 'menu:new', 'success'), btn(this.tr('🧹 پاک‌کردن تاریخچه', '🧹 Clear history'), 'menu:clear', 'danger')],
       [
         btn(this.tr('🖥 سرور', '🖥 Server'), 'menu:server', 'primary'),
         btn(langLabel, 'menu:lang'),
@@ -604,10 +604,10 @@ export class GuardianBot {
   helpKeyboard() {
     return [
       [btn(this.tr('💵 سهمیه و Freebucks', '💵 Quota & Freebucks'), 'help:quota', 'primary')],
-      [btn(this.tr('⏳ سشن و تایمر', '⏳ Session & timer'), 'help:session', 'primary')],
+      [btn(this.tr('⏳ جلسه و تایمر', '⏳ Session & timer'), 'help:session', 'primary')],
       [btn(this.tr('🤖 مدل‌ها', '🤖 Models'), 'help:model', 'primary')],
       [btn(this.tr('👤 اکانت‌ها', '👤 Accounts'), 'help:account', 'primary')],
-      [btn(this.tr('💬 چت و سشن‌ها', '💬 Chat & sessions'), 'help:chat', 'primary')],
+      [btn(this.tr('💬 چت و جلسه‌ها', '💬 Chat & sessions'), 'help:chat', 'primary')],
       [btn(this.tr('🖥 سرور', '🖥 Server'), 'help:server', 'primary')],
       [btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')],
     ];
@@ -623,7 +623,7 @@ export class GuardianBot {
         '💵 *سهمیه و Freebucks*',
         '',
         'فری‌باف هر روز یک بودجهٔ «Freebucks» می‌دهد که بین همهٔ مدل‌ها مشترک است.',
-        '• هر سشن، هنگام شروع، معادل قیمت ساعتی مدل از Freebucks کم می‌کند (یک‌بار، نه هر پیام).',
+        '• هر جلسه، هنگام شروع، معادل قیمت ساعتی مدل از Freebucks کم می‌کند (یک‌بار، نه هر پیام).',
         '• قیمت‌ها (Freebucks برای هر ساعت): GLM=۵ · Kimi=۵ · MiMo=۱۰ · Solar=۱۰ · DeepSeek V4 Flash=۱۵ · Luna=۲۰ · Gemini=۵۰',
         '• اگر همهٔ بودجه روی یک مدل خرج شود: GLM ≈ ۱۴ ساعت · DeepSeek ≈ ۴ ساعت · Luna ≈ ۳ ساعت.',
         '• بودجه هر روز نیمه‌شب Pacific پر می‌شود و منتقل نمی‌شود.',
@@ -632,13 +632,13 @@ export class GuardianBot {
         '📊 استفاده‌شده و مانده در «وضعیت» و «👤 اکانت‌ها» نوشته می‌شود.',
       ].join('\n'),
       session: [
-        '⏳ *سشن و تایمر*',
+        '⏳ *جلسه و تایمر*',
         '',
-        'هر سشن رایگان دقیقاً ۱ ساعت عمر می‌کند و چت‌کردن تمدیدش نمی‌کند.',
-        '• دکمهٔ «⏳ سشن» زمان باقی‌مانده را نشان می‌دهد.',
+        'هر جلسه رایگان دقیقاً ۱ ساعت عمر می‌کند و چت‌کردن تمدیدش نمی‌کند.',
+        '• دکمهٔ «⏳ جلسه» زمان باقی‌مانده را نشان می‌دهد.',
         '• ۵ دقیقه قبل از انقضا هشدار می‌آید (در تنظیمات قابل تغییر).',
-        '• «🔄 تمدید سشن» تایمر را از نو می‌کند؛ «/start» منوی اصلی را باز می‌کند.',
-        '• پیام بعدی هم خودکار سشن تازه می‌سازد؛ پس وقفه‌ای حس نمی‌کنی.',
+        '• «🔄 تمدید جلسه» تایمر را از نو می‌کند؛ «/start» منوی اصلی را باز می‌کند.',
+        '• پیام بعدی هم خودکار جلسه تازه می‌سازد؛ پس وقفه‌ای حس نمی‌کنی.',
       ].join('\n'),
       model: [
         '🤖 *مدل‌ها*',
@@ -658,15 +658,15 @@ export class GuardianBot {
         '• «📋 پیست credentials.json» — اگر فایل را داری.',
         '• «✏️ با نام دلخواه» — قبلش اسم بده.',
         '',
-        'هر اکانت سشن و Freebucks مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
+        'هر اکانت جلسه و Freebucks مستقل دارد؛ با زدن روی اکانت فعال می‌شود.',
       ].join('\n'),
       chat: [
-        '💬 *چت و سشن‌ها*',
+        '💬 *چت و جلسه‌ها*',
         '',
         'یک پیام معمولی بفرست تا با مدل فعال چت کنی.',
-        '• «➕ سشن جدید» یک گفتگوی جدا می‌سازد.',
-        '• «💬 سشن‌ها» برای سوییچ/حذف (حذف با تأیید).',
-        '• «🧹 پاک‌کردن تاریخچه» پیام‌های سشن فعال را پاک می‌کند.',
+        '• «➕ جلسه جدید» یک گفتگوی جدا می‌سازد.',
+        '• «💬 جلسه‌ها» برای سوییچ/حذف (حذف با تأیید).',
+        '• «🧹 پاک‌کردن تاریخچه» پیام‌های جلسه فعال را پاک می‌کند.',
       ].join('\n'),
       server: [
         '🖥 *سرور*',
@@ -768,7 +768,7 @@ export class GuardianBot {
       this.tr(`📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, `📢 Ads: ${this.settings.getAds() ? 'on' : 'off'}`),
       this.tr(`🤖 مدل: \`${this.settings.getModel()}\``, `🤖 Model: \`${this.settings.getModel()}\``),
       this.tr(`👤 اکانت فعال: \`${this.activeAccountName()}\``, `👤 Active account: \`${this.activeAccountName()}\``),
-      this.tr(`⏰ هشدار انقضای سشن: ${warn}`, `⏰ Session expiry warning: ${warn}`),
+      this.tr(`⏰ هشدار انقضای جلسه: ${warn}`, `⏰ Session expiry warning: ${warn}`),
     ].join('\n');
   }
 
@@ -784,14 +784,14 @@ export class GuardianBot {
       [btn(this.tr(`🤖 مدل: ${this.settings.getModel()}`, `🤖 Model: ${this.settings.getModel()}`), 'menu:model', 'primary')],
       [btn(this.tr(`👤 اکانت: ${this.activeAccountName()}`, `👤 Account: ${this.activeAccountName()}`), 'menu:account', 'primary')],
       [warnBtn(0, this.tr('خاموش', 'off')), warnBtn(2, '2m'), warnBtn(5, '5m'), warnBtn(10, '10m')],
-      [btn(this.tr('🔄 تمدید سشن', '🔄 Renew session'), 'menu:renew', 'success')],
+      [btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')],
       [btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')],
     ];
   }
 
   homeText(u) {
     const left = this.chat.remainingMs();
-    const fa = `🛡️ *نگهبان فری‌باف*\n\nمدل: \`${this.settings.getModel()}\`\nسشن فعال: \`${u.activeSession ?? '—'}\`${left == null ? '' : `\n⏳ سشن فری‌باف: ${humanMs(left)} دیگر`}\n\nاز دکمه‌ها استفاده کن یا پیام بفرست تا چت کند.`;
+    const fa = `🛡️ *نگهبان فری‌باف*\n\nمدل: \`${this.settings.getModel()}\`\nجلسه فعال: \`${u.activeSession ?? '—'}\`${left == null ? '' : `\n⏳ جلسه فری‌باف: ${humanMs(left)} دیگر`}\n\nاز دکمه‌ها استفاده کن یا پیام بفرست تا چت کند.`;
     const en = `🛡️ *Freebuff Guardian*\n\nModel: \`${this.settings.getModel()}\`\nActive chat: \`${u.activeSession ?? '—'}\`${left == null ? '' : `\n⏳ Freebuff session: ${humanMs(left, 'en')} left`}\n\nUse the buttons or just send a message to chat.`;
     return this.tr(fa, en);
   }
@@ -872,24 +872,24 @@ export class GuardianBot {
       btn(`${n === u.activeSession ? '✅ ' : ''}${n}`, `ses:${encodeURIComponent(n)}`, n === u.activeSession ? 'success' : 'primary'),
       btn('🗑', `delq:${encodeURIComponent(n)}`, 'danger'),
     ]);
-    rows.push([btn(this.tr('➕ سشن جدید', '➕ New chat'), 'menu:new', 'success')]);
+    rows.push([btn(this.tr('➕ جلسه جدید', '➕ New chat'), 'menu:new', 'success')]);
     rows.push([btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')]);
     return rows;
   }
 
   sessionsText(userId) {
     const names = this.state.listSessions(userId);
-    if (!names.length) return this.tr('هیچ سشنی نیست. ➕ را بزن.', 'No chats yet. Tap ➕.');
+    if (!names.length) return this.tr('هیچ جلسهی نیست. ➕ را بزن.', 'No chats yet. Tap ➕.');
     const u = this.state.user(userId);
     const list = names
       .map((n) => `${n === u.activeSession ? '👉' : '•'} \`${n}\` (${this.state.getSession(userId, n).messages.length} ${this.tr('پیام', 'msgs')})`)
       .join('\n');
-    return `${this.tr('💬 *سشن‌ها*', '💬 *Chats*')}\n${list}`;
+    return `${this.tr('💬 *جلسه‌ها*', '💬 *Chats*')}\n${list}`;
   }
 
   serverKeyboard() {
     return [
-      [btn(this.tr('🔄 تمدید سشن', '🔄 Renew session'), 'menu:renew', 'success')],
+      [btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')],
       [btn(this.tr('📈 پروسه‌ها', '📈 Processes'), 'svc:ps', 'primary')],
       [btn(this.tr('⌨️ اجرای دستور (/sh)', '⌨️ Run command (/sh)'), 'svc:sh', 'primary')],
       [btn(this.tr('♻️ ری‌استارت freebuff', '♻️ Restart freebuff'), 'fb:restart', 'success'), btn(this.tr('⏹ توقف CLI', '⏹ Stop CLI'), 'fb:stop', 'danger')],
@@ -900,7 +900,7 @@ export class GuardianBot {
 
   statusKeyboard() {
     return [
-      [btn(this.tr('🔄 تمدید سشن', '🔄 Renew session'), 'menu:renew', 'success'), btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')],
+      [btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success'), btn(this.tr('🏠 منوی اصلی', '🏠 Home'), 'menu:home')],
     ];
   }
 
@@ -925,12 +925,12 @@ export class GuardianBot {
       `⏱ ${up}`,
       this.tr(`🤖 مدل: \`${this.settings.getModel()}\``, `🤖 Model: \`${this.settings.getModel()}\``),
       sess
-        ? this.tr(`🔓 سشن سرور: \`${sess.model}\` — ⏳ ${humanMs(left)} دیگر`, `🔓 Server session: \`${sess.model}\` — ⏳ ${humanMs(left, 'en')} left`)
-        : this.tr('🔓 سشن سرور: — (پیام بعدی سشن تازه می‌سازد)', '🔓 Server session: — (next message starts a fresh one)'),
+        ? this.tr(`🔓 جلسه سرور: \`${sess.model}\` — ⏳ ${humanMs(left)} دیگر`, `🔓 Server session: \`${sess.model}\` — ⏳ ${humanMs(left, 'en')} left`)
+        : this.tr('🔓 جلسه سرور: — (پیام بعدی جلسه تازه می‌سازد)', '🔓 Server session: — (next message starts a fresh one)'),
       this.tr(`🎛 نوع پاسخ: ${this.modeLabel(this.settings.getMode())}`, `🎛 Response mode: ${this.modeLabel(this.settings.getMode())}`),
       this.tr(`📢 تبلیغات: ${this.settings.getAds() ? 'روشن' : 'خاموش'}`, `📢 Ads: ${this.settings.getAds() ? 'on' : 'off'}`),
       `🔐 ${fbSession}`,
-      this.tr(`💬 سشن فعال: ${this.state.user(userId).activeSession ?? '—'}`, `💬 Active chat: ${this.state.user(userId).activeSession ?? '—'}`),
+      this.tr(`💬 جلسه فعال: ${this.state.user(userId).activeSession ?? '—'}`, `💬 Active chat: ${this.state.user(userId).activeSession ?? '—'}`),
     ];
     const quota = sess ?? this.chat.lastQuota;
     if (!sess && quota) lines.push(this.tr('♻️ سهمیهٔ زیر آخرین مقدار ثبت‌شده است', '♻️ Quota below is the last recorded value'));
@@ -938,27 +938,28 @@ export class GuardianBot {
     return lines.join('\n');
   }
 
-  /** بستن سشن فعلی و ساخت سشن تازه (ریست تایمر ۱ ساعته) */
+  /** بستن جلسه فعلی و ساخت جلسه تازه (ریست تایمر ۱ ساعته) */
   async doRenew(chatId, messageId) {
     this.applyActiveAccount();
     const sess = await this.chat.activeSession().catch(() => null);
     const model = sess?.model || this.settings.getModel();
     try {
       await this.chat.renewSession(model);
-      return this.render(chatId, messageId, this.tr(`✅ سشن \`${model}\` تمدید شد — ⏳ ${humanMs(this.chat.remainingMs())} دیگر`, `✅ Session \`${model}\` renewed — ⏳ ${humanMs(this.chat.remainingMs(), 'en')} left`), this.statusKeyboard());
+      return this.render(chatId, messageId, this.tr(`✅ جلسه \`${model}\` تمدید شد — ⏳ ${humanMs(this.chat.remainingMs())} دیگر`, `✅ Session \`${model}\` renewed — ⏳ ${humanMs(this.chat.remainingMs(), 'en')} left`), this.statusKeyboard());
     } catch (e) {
-      return this.render(chatId, messageId, `❌ ${e.message}`, this.statusKeyboard());
+      // مثلاً وقتی سهمیه تمام شده، دلیل واقعی را نشان بده
+      return this.render(chatId, messageId, `❌ ${this.chatErrorHint(e)}`, this.statusKeyboard());
     }
   }
 
-  /** هشدار یک‌باره پیش از انقضای سشن */
+  /** هشدار یک‌باره پیش از انقضای جلسه */
   async checkSessionWarn() {
     if (this.warnMin <= 0) { this.sessionWarned = false; return; }
     this.applyActiveAccount();
     const warnMin = this.warnMin;
     const left = this.chat.remainingMs();
     if (left == null) {
-      // سشنی شناخته‌شده نیست؛ هر ۵ دقیقه یک‌بار سرور را بررسی کن
+      // جلسهی شناخته‌شده نیست؛ هر ۵ دقیقه یک‌بار سرور را بررسی کن
       if (Date.now() - (this.lastProbe || 0) > 5 * 60000) {
         this.lastProbe = Date.now();
         await this.chat.activeSession().catch(() => {});
@@ -970,10 +971,10 @@ export class GuardianBot {
     if (this.sessionWarned) return;
     this.sessionWarned = true;
     const text = this.tr(
-      `⏳ سشن فری‌باف ${humanMs(left)} دیگر بسته می‌شود.\nبرای تمدید /renew بزن، یا پیام بعدی خودکار سشن تازه می‌سازد.`,
+      `⏳ جلسه فری‌باف ${humanMs(left)} دیگر بسته می‌شود.\nبرای تمدید /renew بزن، یا پیام بعدی خودکار جلسه تازه می‌سازد.`,
       `⏳ Freebuff session closes in ${humanMs(left, 'en')}.\nTap Renew or just send your next message to start a fresh session.`,
     );
-    const kb = { reply_markup: { inline_keyboard: [[{ text: this.tr('🔄 تمدید سشن', '🔄 Renew session'), callback_data: 'menu:renew' }]] } };
+    const kb = { reply_markup: { inline_keyboard: [[{ text: this.tr('🔄 تمدید جلسه', '🔄 Renew session'), callback_data: 'menu:renew' }]] } };
     for (const id of this.cfg.allowedUserIds) {
       const chatId = this.state.user(id).chatId;
       if (chatId) await this.send(chatId, text, kb).catch(() => {});
@@ -1007,11 +1008,11 @@ export class GuardianBot {
           case 'start': {
             const sess = await this.chat.activeSession().catch(() => null);
             if (!sess) {
-              await answer('⏳ ساخت سشن…');
+              await answer('⏳ ساخت جلسه…');
               try { await this.chat.renewSession(this.settings.getModel()); }
               catch (e) { await answer(e.message); }
             } else {
-              await answer(this.tr('سشن فعال است', 'Session is active'));
+              await answer(this.tr('جلسه فعال است', 'Session is active'));
             }
             return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
           }
@@ -1028,11 +1029,11 @@ export class GuardianBot {
           case 'new': {
             const name = `chat-${Object.keys(u.sessions).length + 1}`;
             this.state.ensureSession(userId, name);
-            await answer(`سشن ${name} ساخته شد`);
+            await answer(`جلسه ${name} ساخته شد`);
             return this.render(chatId, messageId, this.sessionsText(userId), this.sessionsKeyboard(userId));
           }
           case 'clear': {
-            if (!u.activeSession) { await answer('سشن فعالی نیست'); return home(); }
+            if (!u.activeSession) { await answer('جلسه فعالی نیست'); return home(); }
             this.state.clearMessages(userId, u.activeSession);
             await answer(this.tr('تاریخچه پاک شد', 'History cleared'));
             return home();
@@ -1090,7 +1091,7 @@ export class GuardianBot {
           return this.send(chatId, `❌ ${this.chatErrorHint(e)}`, { reply_markup: { inline_keyboard: this.homeKeyboard(u) } });
         }
         const session = this.state.getSession(userId, pend.name) || this.state.ensureSession(userId, pend.name);
-        await answer(this.tr('سشن ساخته شد، در حال ارسال…', 'Session started, sending…'));
+        await answer(this.tr('جلسه ساخته شد، در حال ارسال…', 'Session started, sending…'));
         return this.runChat(chatId, userId, pend.name, session, pend.text);
       }
 
@@ -1159,7 +1160,7 @@ export class GuardianBot {
 
       case 'ses': {
         const name = decodeURIComponent(value);
-        if (!this.state.getSession(userId, name)) { await answer(this.tr('سشن پیدا نشد', 'Chat not found')); return home(); }
+        if (!this.state.getSession(userId, name)) { await answer(this.tr('جلسه پیدا نشد', 'Chat not found')); return home(); }
         u.activeSession = name;
         this.state.save();
         await answer(`سوییچ به ${name}`);
@@ -1171,7 +1172,7 @@ export class GuardianBot {
         const kb = [
           [btn('🗑 بله، حذف کن', `delc:${encodeURIComponent(name)}`, 'danger'), btn('↩️ انصراف', 'menu:sessions')],
         ];
-        return this.render(chatId, messageId, `مطمئنی سشن \`${name}\` حذف شود؟`, kb);
+        return this.render(chatId, messageId, `مطمئنی جلسه \`${name}\` حذف شود؟`, kb);
       }
 
       case 'delc': {
@@ -1268,7 +1269,7 @@ export class GuardianBot {
       );
     }
     if (body.includes('waiting_room_required') || status === 428) {
-      return this.tr('سشن فری‌باف تمام شده بود. دوباره پیام بفرست یا «➕ ایجاد سشن جدید» را بزن.', 'Your free session had ended. Send again or tap "➕ Start session".');
+      return this.tr('جلسه فری‌باف تمام شده بود. دوباره پیام بفرست یا «➕ ایجاد جلسه جدید» را بزن.', 'Your free session had ended. Send again or tap "➕ Start session".');
     }
     if (body.includes('free_mode_invalid_agent_model')) {
       return this.tr('این ترکیب مدل و agent مجاز نیست؛ از منوی «مدل» یک مدل دیگر انتخاب کن.', 'This model/agent combination is not allowed; pick another model from the Model menu.');
@@ -1277,7 +1278,7 @@ export class GuardianBot {
       return this.tr('مود رایگان فعلاً فقط از طریق CLI فعال است.', 'Free mode is currently CLI-only.');
     }
     if (body.includes('session_superseded') || status === 409) {
-      return this.tr('تداخل سشن (۴۰۹): یک نمونهٔ دیگر سشن را گرفت. کمی بعد دوباره فرست کن.', 'Session conflict (409): another instance took the session. Try again shortly.');
+      return this.tr('تداخل جلسه (۴۰۹): یک نمونهٔ دیگر جلسه را گرفت. کمی بعد دوباره فرست کن.', 'Session conflict (409): another instance took the session. Try again shortly.');
     }
     if (body.includes('spend_limited') || body.includes('rate_limited') || body.includes('ip_capped') || status === 429) {
       return this.tr('سهمیه/محدودیت امروز تمام شده. تا ریست بعدی صبر کن یا پلن را ارتقا بده.', 'Daily quota/rate limit reached. Wait for the reset or upgrade your plan.');
@@ -1307,17 +1308,17 @@ export class GuardianBot {
     const name = u.activeSession || (this.state.ensureSession(userId, 'chat-1'), 'chat-1');
     const session = this.state.getSession(userId, name);
 
-    // برای جلوگیری از اسراف: اگر سشنی باز نیست، قبل از ساخت سشن اجازه بگیر.
+    // برای جلوگیری از اسراف: اگر جلسهی باز نیست، قبل از ساخت جلسه اجازه بگیر.
     const active = await this.chat.activeSession().catch(() => null);
     if (!active) {
       this.pendingChat.set(userId, { chatId, text, name });
       return this.send(chatId, this.tr(
-        '🚫 فعلاً هیچ سشن فری‌بافی باز نیست.\nاگر بفرستی، یک سشن تازه ساخته می‌شود و از Freebucks امروزت کم می‌کند.',
+        '🚫 فعلاً هیچ جلسه فری‌بافی باز نیست.\nاگر بفرستی، یک جلسه تازه ساخته می‌شود و از Freebucks امروزت کم می‌کند.',
         '🚫 No freebuff session is currently open.\nIf you continue, a new session will start and use your daily Freebucks.',
       ), {
         reply_markup: {
           inline_keyboard: [
-            [btn(this.tr('➕ ایجاد سشن جدید و ارسال', '➕ Start session & send'), 'chatNew:go', 'success')],
+            [btn(this.tr('➕ ایجاد جلسه جدید و ارسال', '➕ Start session & send'), 'chatNew:go', 'success')],
             [btn(this.tr('❌ انصراف', '❌ Cancel'), 'chatNew:cancel', 'danger')],
           ],
         },
@@ -1472,14 +1473,14 @@ export class GuardianBot {
     return { answer: this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)'), thoughts, toolLog };
   }
 
-  /** اجرای واقعی چت روی سشن موجود */
+  /** اجرای واقعی چت روی جلسه موجود */
   /** متن وضعیت: مدل + زمان مانده + سهمیه (برای پیام بالایی) */
   statusBlock() {
     const model = this.settings.getModel();
     const left = this.chat.remainingMs();
     const daily = this.chat.lastQuota?.freebucks?.daily;
     const lines = [this.tr(`🤖 مدل: \`${model}\``, `🤖 Model: \`${model}\``)];
-    if (left != null) lines.push(this.tr(`⏳ سشن: ${humanMs(left)} مانده`, `⏳ Session: ${humanMs(left, 'en')} left`));
+    if (left != null) lines.push(this.tr(`⏳ جلسه: ${humanMs(left)} مانده`, `⏳ Session: ${humanMs(left, 'en')} left`));
     if (daily) {
       const l = Math.max(0, daily.remaining ?? 0);
       const used = daily.spent ?? Math.max(0, (daily.limit ?? 0) - l);
@@ -1493,7 +1494,7 @@ export class GuardianBot {
     if (!this.warnMin || this.warnMin <= 0) return {};
     const left = this.chat.remainingMs();
     if (left == null || left > this.warnMin * 60000) return {};
-    return { reply_markup: { inline_keyboard: [[btn(this.tr('🔄 تمدید سشن', '🔄 Renew session'), 'menu:renew', 'success')]] } };
+    return { reply_markup: { inline_keyboard: [[btn(this.tr('🔄 تمدید جلسه', '🔄 Renew session'), 'menu:renew', 'success')]] } };
   }
 
   async runChat(chatId, userId, name, session, text) {

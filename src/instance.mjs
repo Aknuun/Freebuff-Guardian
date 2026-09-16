@@ -1,7 +1,7 @@
 // instance.mjs — مدیریت instance/قفل فری‌باف (رفع خطای takeover)
 //
-// درسِ سشن قبلی: اگر ربات با freebuff_instance_id متفاوت admission بزند،
-// بک‌اند سشن تعاملی CLI را kick می‌کند (HTTP 409 Conflict) و CLI کاربر پیام
+// درسِ جلسه قبلی: اگر ربات با freebuff_instance_id متفاوت admission بزند،
+// بک‌اند جلسه تعاملی CLI را kick می‌کند (HTTP 409 Conflict) و CLI کاربر پیام
 // «Another freebuff instance took over this account» می‌دهد.
 //
 // راه‌حل: ربات باید:

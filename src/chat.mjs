@@ -1,20 +1,20 @@
 // chat.mjs — موتور چت با بک‌اند فری‌باف
 //
-// یافته‌های سشن قبلی (reverse-engineering باینری و SDK):
+// یافته‌های جلسه قبلی (reverse-engineering باینری و SDK):
 //  • POST /api/v1/agent-runs      {action:'START', agentId, ancestorRunIds:[]} → {runId}
 //  • POST /api/v1/chat/completions با بدنه‌ی OpenAI-compatible؛ متادیتا به‌صورت
 //    کلید سطح بالای codebuff_metadata: { run_id, cost_mode:'free', agent_id, freebuff_instance_id }
 //  • هدر Authorization: Bearer <authToken از credentials.json>
 //  • cost_mode: 'free' → مدل رایگان z-ai/glm-5.3-flash بدون کسر اعتبار
 //  • POST /api/v1/agent-runs {action:'FINISH', runId, ...} برای بستن run
-//  • GET  /api/v1/freebuff/session            → سشن فعال + instanceId
-//  • POST /api/v1/freebuff/session/admission  → ساخت سشن (هدر x-freebuff-model)
+//  • GET  /api/v1/freebuff/session            → جلسه فعال + instanceId
+//  • POST /api/v1/freebuff/session/admission  → ساخت جلسه (هدر x-freebuff-model)
 //
 // نکته‌های حیاتی (کشف‌شده از ترافیک CLI):
 //  1) سرور مود رایگان را فقط وقتی می‌پذیرد که پیام system با جمله‌ی
 //     FREE_MODE_SYSTEM_PREFIX شروع شود؛ وگرنه free_mode_cli_required.
-//  2) freebuff_instance_id باید همان instanceId سشن admitted باشد؛ وگرنه
-//     409 session_superseded. برای همین اول سشن را می‌خوانیم/می‌سازیم.
+//  2) freebuff_instance_id باید همان instanceId جلسه admitted باشد؛ وگرنه
+//     409 session_superseded. برای همین اول جلسه را می‌خوانیم/می‌سازیم.
 //  3) agent باید با مدل هماهنگ باشد؛ وگرنه free_mode_invalid_agent_model.
 
 import { makeLogger } from './logger.mjs';
@@ -47,12 +47,12 @@ export class FreebuffChat {
     this.websiteUrl = websiteUrl.replace(/\/$/, '');
     this.agent = agent;
     this.instances = instanceManager;
-    this.lastSession = null; // آخرین سشن شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
-    this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی سشن بسته است هم نمایش داده می‌شود)
+    this.lastSession = null; // آخرین جلسه شناخته‌شده برای محاسبه‌ی زنده‌ی انقضا
+    this.lastQuota = null; // آخرین سهمیه‌ی دیده‌شده (وقتی جلسه بسته است هم نمایش داده می‌شود)
     this.accountName = null; // نام اکانت فعال (چند-اکانتی)
   }
 
-  /** تغییر اکانت فعال؛ چون سشن/سهمیه per-account است، کش پاک می‌شود */
+  /** تغییر اکانت فعال؛ چون جلسه/سهمیه per-account است، کش پاک می‌شود */
   useAccount(account) {
     if (!account?.authToken) return false;
     if (this.accountName === account.name) return false;
@@ -65,7 +65,7 @@ export class FreebuffChat {
     return true;
   }
 
-  /** ذخیره‌ی سهمیه‌ی سشن برای نمایش حتی بعد از بسته‌شدن سشن */
+  /** ذخیره‌ی سهمیه‌ی جلسه برای نمایش حتی بعد از بسته‌شدن جلسه */
   cacheQuota(session) {
     if (session?.freeWindows || session?.freebucks) {
       this.lastQuota = { freeWindows: session.freeWindows, freebucks: session.freebucks, at: Date.now() };
@@ -81,7 +81,7 @@ export class FreebuffChat {
     };
   }
 
-  /** سشن فعال فری‌باف (instanceId معتبر) یا null */
+  /** جلسه فعال فری‌باف (instanceId معتبر) یا null */
   async activeSession() {
     const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, { headers: this.headers() });
     if (!res.ok) return null;
@@ -96,21 +96,21 @@ export class FreebuffChat {
   }
 
   /**
-   * زمان باقی‌مانده‌ی سشن به میلی‌ثانیه (زنده، از expiresAt) یا null اگر
-   * سشنی شناخته‌شده نباشد. TTL سمت سرور ثابت است و با چت تمدید نمی‌شود.
+   * زمان باقی‌مانده‌ی جلسه به میلی‌ثانیه (زنده، از expiresAt) یا null اگر
+   * جلسهی شناخته‌شده نباشد. TTL سمت سرور ثابت است و با چت تمدید نمی‌شود.
    */
   remainingMs() {
     if (!this.lastSession?.expiresAt) return null;
     return new Date(this.lastSession.expiresAt).getTime() - Date.now();
   }
 
-  /** پایان سشن فعلی (برای آزادسازی مدل) */
+  /** پایان جلسه فعلی (برای آزادسازی مدل) */
   async endSession(instanceId) {
     const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session`, {
       method: 'DELETE',
       headers: this.headers({ 'x-freebuff-instance-id': instanceId }),
     });
-    if (!res.ok) log.warn('پایان سشن ناموفق:', res.status);
+    if (!res.ok) log.warn('پایان جلسه ناموفق:', res.status);
     return res.ok;
   }
 
@@ -120,7 +120,7 @@ export class FreebuffChat {
       case 'model_unavailable':
         return `مدل ${data.requestedModel} فعلاً برای اکانت تو در دسترس نیست${data.availableHours ? ` (پنجره‌ی دسترسی: ${data.availableHours})` : ''}`;
       case 'model_locked':
-        return `سشن قبلی روی ${data.currentModel} قفل است؛ اول آن را ببند`;
+        return `جلسه قبلی روی ${data.currentModel} قفل است؛ اول آن را ببند`;
       case 'consent_required':
         return `تأیید هزینه لازم است (${data.walletConsent?.walletSpend ?? '—'})`;
       case 'rate_limited':
@@ -132,7 +132,7 @@ export class FreebuffChat {
     }
   }
 
-  /** درخواست admission برای ساخت سشن جدید؛ شیء سشن را برمی‌گرداند */
+  /** درخواست admission برای ساخت جلسه جدید؛ شیء جلسه را برمی‌گرداند */
   async admitSession(model) {
     const res = await fetch(`${this.websiteUrl}/api/v1/freebuff/session/admission`, {
       method: 'POST',
@@ -150,7 +150,7 @@ export class FreebuffChat {
     return data;
   }
 
-  /** بستن سشن فعلی و ساخت سشن تازه با همان مدل (ریست تایمر ۱ ساعته) */
+  /** بستن جلسه فعلی و ساخت جلسه تازه با همان مدل (ریست تایمر ۱ ساعته) */
   async renewSession(model) {
     const session = await this.activeSession();
     if (session) await this.endSession(session.instanceId);
@@ -158,8 +158,8 @@ export class FreebuffChat {
   }
 
   /**
-   * اطمینان از سشن با مدل خواسته‌شده: اگر سشن فعال مدل دیگری دارد، آن را
-   * می‌بندد و با مدل جدید admission می‌زند (سرور فقط یک سشن هم‌زمان می‌دهد).
+   * اطمینان از جلسه با مدل خواسته‌شده: اگر جلسه فعال مدل دیگری دارد، آن را
+   * می‌بندد و با مدل جدید admission می‌زند (سرور فقط یک جلسه هم‌زمان می‌دهد).
    */
   async switchSessionModel(model) {
     const session = await this.activeSession();
@@ -168,7 +168,7 @@ export class FreebuffChat {
     try {
       return await this.admitSession(model);
     } catch (e) {
-      // بعد از admission ناموفق، سرور گاهی یک سشن fallback روی مدل پیش‌فرض
+      // بعد از admission ناموفق، سرور گاهی یک جلسه fallback روی مدل پیش‌فرض
       // می‌سازد که مدل را قفل می‌کند؛ یک‌بار آن را می‌بندیم و دوباره تلاش می‌کنیم.
       if (e.code === 'model_locked') {
         const fallback = await this.activeSession();
@@ -181,11 +181,11 @@ export class FreebuffChat {
     }
   }
 
-  /** سشن معتبر برای این چت؛ در نهایت اگر همه‌چیز شکست خورد instance محلی */
+  /** جلسه معتبر برای این چت؛ در نهایت اگر همه‌چیز شکست خورد instance محلی */
   async resolveSession(model) {
     let session = await this.activeSession();
     if (!session) {
-      // بدون سشن معتبر، ساختن instance جعلی بی‌فایده است (منجر به ۴۲۸ می‌شود)؛
+      // بدون جلسه معتبر، ساختن instance جعلی بی‌فایده است (منجر به ۴۲۸ می‌شود)؛
       // پس خطای واقعی admission را بالا می‌فرستیم تا کاربر دلیلش را ببیند.
       return await this.admitSession(model || this.agent);
     }
@@ -193,9 +193,9 @@ export class FreebuffChat {
     const left = this.remainingMs();
     if (left !== null && left <= 60_000) {
       // نزدیک انقضا؛ پیش از ارسال پیام تمدید می‌کنیم تا وسط درخواست قطع نشود.
-      log.info('سشن نزدیک انقضا بود؛ تمدید شد');
+      log.info('جلسه نزدیک انقضا بود؛ تمدید شد');
       session = await this.renewSession(session.model).catch((e) => {
-        log.warn('تمدید ناموفق؛ ادامه با سشن فعلی:', e.message);
+        log.warn('تمدید ناموفق؛ ادامه با جلسه فعلی:', e.message);
         return session;
       });
     } else if (model && session.model !== model) {
@@ -207,7 +207,7 @@ export class FreebuffChat {
     return session;
   }
 
-  /** خواندن سشن/سهمیه یک اکانت دلخواه (بدون دست‌زدن به کش چت) */
+  /** خواندن جلسه/سهمیه یک اکانت دلخواه (بدون دست‌زدن به کش چت) */
   async accountQuota(account) {
     if (!account?.authToken) return null;
     try {
@@ -287,8 +287,8 @@ export class FreebuffChat {
    */
   async rawComplete({ model, messages, tools, maxTokens = 2048, agent }, retry = true) {
     if (!this.authToken) throw new Error('احراز هویت فری‌باف تنظیم نشده است');
-    // سشن معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
-    // همان سشن admitted باشد وگرنه 409 session_superseded.
+    // جلسه معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
+    // همان جلسه admitted باشد وگرنه 409 session_superseded.
     const session = await this.resolveSession(model);
     const useModel = session.model || model;
     // در مود رایگان، agent باید با مدل نهایی هماهنگ باشد؛ وگرنه
@@ -318,9 +318,9 @@ export class FreebuffChat {
     const text = await res.text();
     if (!res.ok) {
       await this.finishRun(runId, 'error');
-      // 428 = سشن بین راه تمام شده؛ یک سشن تازه بساز و یک‌بار دیگر تلاش کن.
+      // 428 = جلسه بین راه تمام شده؛ یک جلسه تازه بساز و یک‌بار دیگر تلاش کن.
       if (retry && res.status === 428) {
-        log.warn('سشن منقضی شده بود (428)؛ تمدید و تلاش دوباره');
+        log.warn('جلسه منقضی شده بود (428)؛ تمدید و تلاش دوباره');
         // اگر تمدید شکست خورد (مثلاً سهمیه تمام است) همان خطا را نشان بده.
         await this.renewSession(useModel);
         return this.rawComplete({ model, messages, tools, maxTokens, agent }, false);
