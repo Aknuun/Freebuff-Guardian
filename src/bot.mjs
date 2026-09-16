@@ -165,6 +165,7 @@ export class GuardianBot {
       case 'status':
         return this.send(chatId, await this.statusText(userId), { reply_markup: { inline_keyboard: this.statusKeyboard() } });
       case 'model':
+        await this.chat.activeSession().catch(() => {});
         return this.send(chatId, this.modelText(), { reply_markup: { inline_keyboard: this.modelKeyboard() } });
       default:
         return;
@@ -407,14 +408,18 @@ export class GuardianBot {
         return this.send(chatId, this.tr('استفاده: /account | /account use <n> | /account add <n> | /account del <n>', 'Usage: /account | /account use <n> | /account add <n> | /account del <n>'));
       }
 
-      case '/models':
+      case '/models': {
+        await this.chat.activeSession().catch(() => {});
+        const note = this.quotaExhaustedNote();
         return this.send(chatId, [
           this.tr('🤖 *مدل‌های رایگان قابل انتخاب*', '🤖 *Available free models*'),
           ...freeModels().map((m) => m === this.settings.getModel() ? `👉 \`${m}\`` : `• \`${m}\``),
           '',
           this.tr('با /model provider/model سوییچ کن.', 'Switch with /model provider/model.'),
           this.tr('⚠️ سرور ممکن است بعضی مدل‌ها را موقتاً «در دسترس نبودن» برگرداند.', '⚠️ The server may temporarily report some models as unavailable.'),
+          ...(note ? ['', note] : []),
         ].join('\n'));
+      }
 
       case '/ads': {
         if (arg !== 'on' && arg !== 'off') return this.send(chatId, 'استفاده: /ads on|off');
@@ -740,12 +745,28 @@ export class GuardianBot {
     return this.tr(fa, en);
   }
 
+  /** هشدار اتمام سهمیه (اگر Freebucks امروز صفر باشد) */
+  quotaExhaustedNote() {
+    const daily = this.chat.lastQuota?.freebucks?.daily;
+    if (!daily || daily.remaining > 0) return '';
+    const ms = daily.resetAt ? Date.parse(daily.resetAt) - Date.now() : null;
+    const resetFa = ms > 0 ? `؛ ریست تا ${humanMs(ms, 'fa')} دیگر` : '';
+    const resetEn = ms > 0 ? `; resets in ${humanMs(ms, 'en')}` : '';
+    return this.tr(
+      `🚫 سهمیهٔ Freebucks امروز تمام شده${resetFa}.\nمی‌توانی پلن را ارتقا بدهی: https://freebuff.com/plans`,
+      `🚫 Daily Freebucks are used up${resetEn}.\nYou can upgrade: https://freebuff.com/plans`,
+    );
+  }
+
   modelText() {
     const cur = this.settings.getModel();
-    return this.tr(
+    const base = this.tr(
       `🤖 *مدل‌های رایگان*\nفعلی: \`${cur}\`\nکنار هر مدل قیمت (Freebucks/ساعت) و سهمیهٔ ساعتی امروز با آن مدل نوشته شده.`,
       `🤖 *Free models*\nCurrent: \`${cur}\`\nEach model shows its price (Freebucks/hour) and today's hours left with it.`,
     );
+    // هشدار سهمیه در پایین متن (نه بالا)
+    const note = this.quotaExhaustedNote();
+    return note ? `${base}\n\n${note}` : base;
   }
 
   modelKeyboard() {
@@ -942,7 +963,9 @@ export class GuardianBot {
             }
             return this.render(chatId, messageId, await this.statusText(userId), this.statusKeyboard());
           }
-          case 'model': return this.render(chatId, messageId, this.modelText(), this.modelKeyboard());
+          case 'model':
+            await this.chat.activeSession().catch(() => {});
+            return this.render(chatId, messageId, this.modelText(), this.modelKeyboard());
           case 'lang':
             this.toggleLang();
             await answer(this.tr('زبان: English', 'Language: فارسی'));
@@ -1159,8 +1182,8 @@ export class GuardianBot {
       const when = ms ? humanMs(ms, this.lang()) : '';
       const link = e.data?.upgrade?.url || 'https://freebuff.com/plans';
       return this.tr(
-        `🚫 سهمیهٔ Freebucks امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.\nمی‌توانی پلن را ارتقا بدهی: ${link}`,
-        `🚫 Your daily Freebucks are used up${when ? `; resets in ${when}` : ''}.\nYou can upgrade: ${link}`,
+        `سهمیهٔ Freebucks امروز تمام شده${when ? `؛ ریست تا ${when} دیگر` : ''}.\nمی‌توانی پلن را ارتقا بدهی: ${link}`,
+        `Your daily Freebucks are used up${when ? `; resets in ${when}` : ''}.\nYou can upgrade: ${link}`,
       );
     }
     if (body.includes('waiting_room_required') || status === 428) {
@@ -1242,7 +1265,9 @@ export class GuardianBot {
     } catch (e) {
       log.error('چت ناموفق:', e);
       const hint = this.chatErrorHint(e);
-      await this.bot.editMessageText(`❌ ${hint.slice(0, 500)}`, { chat_id: chatId, message_id: progress.message_id }).catch(() => {});
+      // خطا به‌صورت پیام تازه در پایین فرستاده می‌شود (نه ویرایش پیام بالایی).
+      await this.bot.deleteMessage(chatId, progress.message_id).catch(() => {});
+      await this.send(chatId, `❌ ${hint.slice(0, 500)}`, { reply_markup: { inline_keyboard: this.statusKeyboard() } }).catch(() => {});
     } finally {
       this.busy.delete(userId);
     }
