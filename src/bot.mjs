@@ -2326,10 +2326,10 @@ export class GuardianBot {
           );
         }
         if (lastThoughts) {
-          // فقط ۸ خط آخر تفکرات نمایش داده شود؛ خطوط جدید جای قبلی‌ها را می‌گیرند
-          const lines = lastThoughts.split('\n').filter((l) => l.trim() !== '');
-          const tail = lines.slice(-8).join('\n');
-          if (tail) body += '\n\n' + tail.slice(-1500);
+          // فقط ۴۰ کلمهٔ آخر تفکرات نمایش داده شود؛ کلمات جدید جای قبلی‌ها را می‌گیرند
+          const words = lastThoughts.split(/\s+/).filter(Boolean);
+          const tail = words.slice(-40).join(' ');
+          if (tail) body += '\n\n' + tail.slice(-600);
         }
         if (lastToolLog.length) {
           body += '\n\n' + this.tr('🔧 در حال اجرا:', '🔧 Running:') + '\n' + lastToolLog.map((t) => '• ' + t).join('\n');
