@@ -2132,7 +2132,7 @@ export class GuardianBot {
     const MAX_REPEAT = Math.max(1, parseInt(process.env.FREEBUFF_MAX_TOOL_REPEAT || '2', 10) || 2);
     for (let step = 0; step < MAX_STEPS; step++) {
       if (signal?.aborted) throw abortError();
-      const { message } = await this.chat.rawComplete({ model, messages, tools, signal });
+      const { message, finishReason } = await this.chat.rawComplete({ model, messages, tools, signal });
       const reasoning = String(message?.reasoning_content || message?.reasoning || '').trim();
       if (reasoning) thoughts += (thoughts ? '\n\n' : '') + reasoning;
       // تفکرات تازه را همان لحظه نشان بده (حتی وقتی ابزاری صدا نمی‌شود)
@@ -2170,20 +2170,24 @@ export class GuardianBot {
       let content = (message?.content || '').toString().trim();
       if (!content && !emptyRetried) {
         // مدل بدون ابزار و بدون متن تمام کرد (اغلب توکن‌ها صرف reasoning شده)؛
-        // یک بار دیگر فقط برای گرفتن پاسخ نهایی امتحان کن.
+        // یک بار دیگر با بودجهٔ کامل فقط برای گرفتن پاسخ نهایی امتحان کن.
         emptyRetried = true;
         messages.push({ role: 'assistant', content: '' });
-        messages.push({ role: 'user', content: this.tr('حالا فقط پاسخ نهایی را بنویس؛ ابزار دیگری لازم نیست.', 'Now output only the final answer; no more tools.') });
+        messages.push({ role: 'user', content: this.tr('حالا فقط پاسخ نهایی و کامل را بنویس؛ ابزار دیگری لازم نیست و بیشتر فکر نکن.', 'Now write only the final, complete answer; no more tools and do not keep thinking.') });
         continue;
       }
-      // اگر متن نهایی خالی بود ولی reasoning داشتیم، از reasoning استفاده کن تا کاربر پیام خالی نگیرد.
-      if (!content && reasoning) content = reasoning;
+      if (!content) {
+        // حتی بعد از درخواست دوباره متنی نداد؛ به‌جای افشای خام تفکرات، پیام روشن بده.
+        return { answer: this.tr('(مدل پاسخ نهایی نداد؛ دوباره بفرست یا مدل را عوض کن)', '(model produced no final answer; resend or switch the model)'), thoughts, toolLog };
+      }
+      // اگر پاسخ به سقف توکن خورده و وسطش بریده شده، ادامه‌اش را بگیر تا کامل شود.
+      content = await this.completeByContinuation({ model, messages, content, finishReason, signal });
       return { answer: content, thoughts, toolLog };
     }
     // به سقف گام‌ها رسیدیم: یک بار دیگر بدون ابزار پاسخ نهایی را بگیر تا کاربر
     // به‌جای پیام «سقف گام» جواب واقعی بگیرد.
     try {
-      const { message } = await this.chat.rawComplete({
+      const { message, finishReason } = await this.chat.rawComplete({
         model,
         signal,
         messages: [
@@ -2191,14 +2195,44 @@ export class GuardianBot {
           { role: 'user', content: this.tr('به سقف تعداد گام‌های ابزار رسیدی. همین حالا فقط با اطلاعاتی که تا الان جمع کرده‌ای، پاسخ نهایی و کامل را بنویس؛ دیگر از هیچ ابزاری استفاده نکن.', 'You reached the tool-step limit. Now write the final, complete answer using only the information gathered so far; do not use any more tools.') },
         ],
       });
-      const content = String(message?.content || '').trim()
-        || String(message?.reasoning_content || message?.reasoning || '').trim();
-      if (content) return { answer: content, thoughts, toolLog };
+      let content = String(message?.content || '').trim();
+      if (content) {
+        content = await this.completeByContinuation({ model, messages, content, finishReason, signal });
+        return { answer: content, thoughts, toolLog };
+      }
     } catch (e) {
       if (signal?.aborted || e?.name === 'AbortError') throw e;
       log.warn('گرفتن پاسخ نهایی بعد از سقف گام ناموفق بود:', e.message);
     }
     return { answer: this.tr('(به سقف تعداد گام‌های ابزار رسیدم)', '(reached the tool step limit)'), thoughts, toolLog };
+  }
+
+  /**
+   * اگر پاسخ به سقف توکن خورده باشد (finish_reason='length')، از مدل می‌خواهد
+   * از همان‌جا که قطع شد ادامه دهد و تکه‌ها را به هم می‌چسباند تا کامل شود.
+   * بدون این کار پاسخ‌های بلند وسط جمله ناقص می‌مانند.
+   */
+  async completeByContinuation({ model, messages, content, finishReason, signal }) {
+    const maxCont = Math.max(0, parseInt(process.env.FREEBUFF_MAX_CONTINUATIONS || '6', 10) || 6);
+    let out = content;
+    let finish = finishReason;
+    for (let i = 0; finish === 'length' && i < maxCont; i++) {
+      if (signal?.aborted) throw abortError();
+      const { message, finishReason: fr } = await this.chat.rawComplete({
+        model,
+        signal,
+        messages: [
+          ...messages,
+          { role: 'assistant', content: out },
+          { role: 'user', content: this.tr('پاسخ را از همان‌جا که قطع شد ادامه بده؛ هیچ چیز را تکرار نکن.', 'Continue the answer exactly where it was cut off; do not repeat anything.') },
+        ],
+      });
+      finish = fr;
+      const more = String(message?.content || '').trim();
+      if (!more) break;
+      out += more;
+    }
+    return out;
   }
 
   /** اجرای واقعی چت روی جلسه موجود */

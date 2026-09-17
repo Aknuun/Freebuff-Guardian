@@ -28,6 +28,10 @@ const log = makeLogger('chat');
 // بعد از این جمله می‌آیند.
 const FREE_MODE_SYSTEM_PREFIX = 'You are Buffy, the coding agent behind Codebuff.';
 
+// سقف توکن خروجی هر درخواست. CLI رسمی فری‌باف ۳۲۰۰۰ می‌فرستد؛ مقدار کم باعث
+// بریده‌شدن پاسخ‌های بلند (finish_reason='length') می‌شود. با env قابل تنظیم است.
+const DEFAULT_MAX_TOKENS = Math.max(1024, parseInt(process.env.FREEBUFF_MAX_TOKENS || '32000', 10) || 32000);
+
 /** خطای «توسط کاربر متوقف شد» (AbortError) برای تشخیص راحت در لایهٔ بالاتر */
 export function abortError() {
   const e = new Error('aborted by user');
@@ -393,7 +397,7 @@ export class FreebuffChat {
    * یک درخواست خام به chat/completions؛ پیام assistant کامل (شامل tool_calls)
    * را برمی‌گرداند تا حلقهٔ ابزار در لایهٔ بالاتر اجرا شود.
    */
-  async rawComplete({ model, messages, tools, maxTokens = 4096, agent, signal }, retry = true) {
+  async rawComplete({ model, messages, tools, maxTokens = DEFAULT_MAX_TOKENS, agent, signal }, retry = true) {
     if (!this.authToken) throw new Error('احراز هویت فری‌باف تنظیم نشده است');
     if (signal?.aborted) throw abortError();
     // جلسه معتبر را بگیر (در صورت نیاز مدل را سوییچ می‌کند)؛ instanceId باید
@@ -441,6 +445,15 @@ export class FreebuffChat {
         // اگر تمدید شکست خورد (مثلاً سهمیه تمام است) همان خطا را نشان بده.
         await this.renewSession(useModel);
         return this.rawComplete({ model, messages, tools, maxTokens, agent, signal }, false);
+      }
+      // اگر سرور مقدار max_tokens را زیاد بداند، با مقدار کمتر دوباره تلاش کن
+      // تا ارتقای سقف پاسخ‌های بلند ربات را از کار نیندازد.
+      if (retry && res.status === 400 && /max[_ ]?tokens?/i.test(text) && /(too large|greater|exceed|maximum|max allowed|limit)/i.test(text)) {
+        const lower = Math.min(maxTokens, 8192);
+        if (lower < maxTokens) {
+          log.warn(`مقدار max_tokens=${maxTokens} پذیرفته نشد؛ با ${lower} دوباره تلاش می‌کنم`);
+          return this.rawComplete({ model, messages, tools, maxTokens: lower, agent, signal }, false);
+        }
       }
       const err = new Error(`چت ناموفق (${res.status}): ${text.slice(0, 300)}`);
       err.status = res.status;
