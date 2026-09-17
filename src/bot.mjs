@@ -125,6 +125,20 @@ function humanMs(ms, lang = 'fa') {
   return `${Math.floor(total / 60)} ساعت و ${total % 60} دقیقه`;
 }
 
+/** تقسیم متن بلند به تکه‌های مجاز تلگرام (پاسخ‌ها بریده نشوند) */
+function splitForTelegram(text, limit = 3900) {
+  const chunks = [];
+  let rest = String(text ?? '');
+  while (rest.length > limit) {
+    let cut = rest.lastIndexOf('\n', limit);
+    if (cut < Math.floor(limit * 0.5)) cut = limit;
+    chunks.push(rest.slice(0, cut).replace(/\n+$/, ''));
+    rest = rest.slice(cut).replace(/^\n+/, '');
+  }
+  if (rest) chunks.push(rest);
+  return chunks.length ? chunks : [''];
+}
+
 export class GuardianBot {
   constructor(cfg, state, instances) {
     this.cfg = cfg;
@@ -2425,11 +2439,13 @@ export class GuardianBot {
         await this.editText(chatId, statusId, statusText.replace(/[*_`]/g, ''));
       }
 
-      const out = answer.length > this.cfg.maxAnswerChars
-        ? answer.slice(0, this.cfg.maxAnswerChars) + '\n…' + this.tr('(بریده شد)', '(truncated)')
-        : answer || this.tr('(پاسخ خالی)', '(empty answer)');
-      // جواب چت باید دست‌نخورده بماند؛ دکمهٔ تمدید در پیام جدا می‌آید
-      await this.send(chatId, out);
+      const full = (answer || '').trim() || this.tr('(پاسخ خالی)', '(empty answer)');
+      // پاسخ بلند به‌جای بریدن، در چند پیام پشت‌سرهم فرستاده می‌شود
+      const parts = splitForTelegram(full);
+      for (let i = 0; i < parts.length; i++) {
+        const head = parts.length > 1 ? this.tr(`(${i + 1}/${parts.length})\n`, `(${i + 1}/${parts.length})\n`) : '';
+        await this.send(chatId, head + parts[i]);
+      }
       await this.maybeSendRenew(chatId);
     } catch (e) {
       // نگهبان اجرا: مدت زیادی از سرور خبری نشد و خودمان متوقف کردیم
