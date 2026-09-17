@@ -139,6 +139,14 @@ function splitForTelegram(text, limit = 3900) {
   return chunks.length ? chunks : [''];
 }
 
+/** فقط n کاراکتر آخر متن (برای نمایش کوتاه تفکرات، مثل نگهبان اوپن‌کد) */
+function clipTail(s, n = 180) {
+  const t = String(s ?? '').trim();
+  if (!t) return '';
+  const r = Array.from(t);
+  return r.length <= n ? t : '…' + r.slice(r.length - n).join('');
+}
+
 export class GuardianBot {
   constructor(cfg, state, instances) {
     this.cfg = cfg;
@@ -2367,10 +2375,9 @@ export class GuardianBot {
           );
         }
         if (lastThoughts) {
-          // فقط ۴۰ کلمهٔ آخر تفکرات نمایش داده شود؛ کلمات جدید جای قبلی‌ها را می‌گیرند
-          const words = lastThoughts.split(/\s+/).filter(Boolean);
-          const tail = words.slice(-40).join(' ');
-          if (tail) body += '\n\n' + tail.slice(-600);
+          // مثل نگهبان اوپن‌کد: فقط یک خط کوتاه از آخرین تفکرات (۱۸۰ کاراکتر آخر)
+          const tail = clipTail(lastThoughts.replace(/\s+/g, ' ').trim(), 180);
+          if (tail) body += '\n\n🤔 ' + tail;
         }
         if (lastToolLog.length) {
           // فقط ۲ دستور آخر و هرکدام کوتاه، تا پیام وضعیت بلند نشود
